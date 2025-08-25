@@ -40,7 +40,11 @@ service:
 ingress:
   enabled: false
   className: "nginx"
-  annotations: {}
+  annotations:
+    # Websocket support and long-lived connections for ingress-nginx
+    nginx.ingress.kubernetes.io/enable-websocket: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
   #  kubernetes.io/ingress.class: nginx
   #  kubernetes.io/tls-acme: "true"
   hosts:
@@ -117,7 +121,6 @@ autoscaling:
 persistence:
   enabled: true
   size: 1Gi
-  mountPath: /var/lib/headscale
 
 # Headscale configuration
 configMap:

@@ -18,13 +18,24 @@ You can enable or disable the client container via the `client.enabled` value in
 
 Headscale requires persistence to store its database and noise private key. This chart configures a PersistentVolumeClaim (PVC) to ensure that Headscale's data is not lost across pod restarts or redeployments.
 
-By default, persistence is enabled with a 1Gi volume. You can configure the size and mount path through the `persistence` section in `values.yaml`.
+By default, persistence is enabled with a 1Gi volume. You can configure the size through the `persistence` section in `values.yaml`. Data is stored at `/var/lib/headscale` inside the container and this mount path is fixed by the chart.
 
 ## Ingress
 
 The chart provides an option to expose the Headscale service via an Ingress resource. This allows you to access your Headscale instance from outside the Kubernetes cluster using a domain name.
 
 You can enable Ingress by setting `ingress.enabled` to `true` in `values.yaml`. You can also configure the Ingress class, hosts, TLS settings, and annotations to customize its behavior for your environment.
+
+WebSockets must be supported by your ingress for Headscale to work correctly. For ingress-nginx, the chart defaults include annotations enabling WebSockets and long-lived timeouts:
+
+```yaml
+ingress:
+  annotations:
+    nginx.ingress.kubernetes.io/enable-websocket: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+```
+If you use another ingress controller, configure equivalent settings to allow WebSocket upgrades and long read/send timeouts.
 
 ## Headscale UI
 
@@ -89,7 +100,7 @@ $ helm install my-release foo-bar/headscale
 | image.repository | string | `"headscale/headscale"` |  |
 | image.tag | string | `"v0.26.1"` |  |
 | imagePullSecrets | list | `[]` |  |
-| ingress.annotations | object | `{}` |  |
+| ingress.annotations | object | `{"nginx.ingress.kubernetes.io/enable-websocket":"\"true\"","nginx.ingress.kubernetes.io/proxy-read-timeout":"\"3600\"","nginx.ingress.kubernetes.io/proxy-send-timeout":"\"3600\""}` |  |
 | ingress.className | string | `"nginx"` |  |
 | ingress.enabled | bool | `false` |  |
 | ingress.hosts[0].host | string | `"headscale.local"` |  |
@@ -104,7 +115,6 @@ $ helm install my-release foo-bar/headscale
 | livenessProbe.timeoutSeconds | int | `3` |  |
 | nameOverride | string | `""` |  |
 | persistence.enabled | bool | `true` |  |
-| persistence.mountPath | string | `"/var/lib/headscale"` |  |
 | persistence.size | string | `"1Gi"` |  |
 | podAnnotations | object | `{}` |  |
 | podLabels | object | `{}` |  |
