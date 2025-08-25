@@ -42,6 +42,8 @@ ingress:
   className: "nginx"
   annotations:
     # Websocket support and long-lived connections for ingress-nginx
+    nginx.ingress.kubernetes.io/client-body-buffer-size: 1m
+    nginx.ingress.kubernetes.io/proxy-body-size: 8000m
     nginx.ingress.kubernetes.io/enable-websocket: "true"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
@@ -157,6 +159,14 @@ client:
       repository: tailscale/tailscale
       pullPolicy: IfNotPresent
       tag: "latest"
+  authKeyJob:
+    enabled: true
+    useHook: true
+    # When useHook=false (regular Job), automatically clean up after finish
+    ttlSecondsAfterFinished: 300
+    backoffLimit: 1
+    activeDeadlineSeconds: 600
+    waitReadyTimeoutSeconds: 300
 
 # Optional Headscale UI
 ui:
