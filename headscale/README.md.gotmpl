@@ -10,7 +10,6 @@ This Helm chart includes an optional client container that runs a Tailscale clie
 The client container is configured to:
 - Start the `tailscaled` daemon in the background.
 - Use `tailscale up` to connect to the Headscale server.
-- Automatically restart if the Headscale server's secret (containing the preauthkey) is updated, ensuring it always uses the latest authentication details.
 
 You can enable or disable the client container via the `client.enabled` value in `values.yaml`.
 
