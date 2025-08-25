@@ -23,24 +23,45 @@ spec:
         hostPath:
           path: /dev/net/tun
           type: CharDevice
+      - name: client-auth
+        secret:
+          secretName: {{ include "headscale.fullname" . }}-client-authkey
+          optional: true
       containers:
       - name: tailscale
         image: "{{ .Values.client.image.repository }}:{{ .Values.client.image.tag }}"
         imagePullPolicy: {{ .Values.client.image.pullPolicy }}
-        env:
-        - name: AUTH_KEY
-          valueFrom:
-            secretKeyRef:
-              name: {{ include "headscale.fullname" . }}-client-authkey
-              key: authkey
         command:
         - /bin/sh
         - -c
         - |
-          tailscaled & # Start the daemon in the background
-          tailscale up --authkey=$AUTH_KEY --hostname={{ .Chart.Name }}-client --login-server=http://{{ include "headscale.fullname" . }}:8080
-          wait $! # Wait for tailscaled to exit, or for tailscale up to fail
-          tail -f /dev/null # Keep the container alive
+          set -Eeuo pipefail
+          AUTH_FILE="/etc/client-auth/authkey"
+          echo "[client] Waiting for preauth key at $AUTH_FILE ..."
+          # Try up to ~10 minutes for the Secret to appear via projected volume
+          for i in $(seq 1 120); do
+            if [ -s "$AUTH_FILE" ]; then
+              break
+            fi
+            echo "[client] auth key not present yet ($i/120)"
+            sleep 5
+          done
+
+          echo "[client] Starting tailscaled"
+          tailscaled &
+
+          # If key exists, perform login; otherwise keep running and allow later manual login
+          if [ -s "$AUTH_FILE" ]; then
+            AUTH_KEY=$(cat "$AUTH_FILE")
+            echo "[client] Performing tailscale up"
+            tailscale up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client --login-server=http://{{ include "headscale.fullname" . }}:8080 || true
+          else
+            echo "[client] No preauth key found after timeout; skipping tailscale up for now."
+          fi
+
+          # Keep container alive
+          wait $! || true
+          tail -f /dev/null
         securityContext:
           capabilities:
             add:
@@ -48,4 +69,7 @@ spec:
         volumeMounts:
         - name: dev-net-tun
           mountPath: /dev/net/tun
+        - name: client-auth
+          mountPath: /etc/client-auth
+          readOnly: true
 {{- end }}
