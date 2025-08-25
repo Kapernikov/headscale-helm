@@ -20,7 +20,8 @@ jobs:
           RELEASE_VERSION=${{ github.ref_name }}
           # Remove 'v' prefix if present (e.g., v1.0.0 -> 1.0.0)
           CHART_VERSION=$(echo "$RELEASE_VERSION" | sed 's/^v//')
-          yq e '.version = "'"$CHART_VERSION"'"' -i ./headscale/Chart.yaml
+          # Update version field in Chart.yaml without yq dependency
+          sed -i -E "s/^version: .*/version: ${CHART_VERSION}/" ./headscale/Chart.yaml
           echo "Updated Chart.yaml version to $CHART_VERSION"
 
       - name: Set up Helm
@@ -38,4 +39,6 @@ jobs:
         run: |
           CHART_NAME=$(grep '^name:' ./headscale/Chart.yaml | awk '{print $2}')
           CHART_VERSION=$(grep '^version:' ./headscale/Chart.yaml | awk '{print $2}')
-          helm push ${CHART_NAME}-${CHART_VERSION}.tgz oci://ghcr.io/${{ github.repository }}
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          # Push to a lowercase, stable namespace under the owner
+          helm push "${CHART_NAME}-${CHART_VERSION}.tgz" "oci://ghcr.io/${OWNER_LC}/charts"
