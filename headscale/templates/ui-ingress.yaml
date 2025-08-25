@@ -1,0 +1,38 @@
+{{- if and .Values.ingress.enabled .Values.ui.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "headscale.fullname" . }}-ui
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ui
+  {{- $mergedAnnotations := merge (dict) .Values.ingress.annotations .Values.ui.ingress.annotations }}
+  {{- if $mergedAnnotations }}
+  annotations:
+    {{- toYaml $mergedAnnotations | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ui.ingress.tls }}
+  tls:
+    {{- range .Values.ui.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ui.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.ui.ingress.path }}
+            pathType: {{ .Values.ui.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "headscale.fullname" . }}-ui
+                port:
+                  name: http
+{{- end }}
+

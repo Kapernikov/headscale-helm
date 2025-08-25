@@ -25,6 +25,29 @@ The chart provides an option to expose the Headscale service via an Ingress reso
 
 You can enable Ingress by setting `ingress.enabled` to `true` in `values.yaml`. You can also configure the Ingress class, hosts, TLS settings, and annotations to customize its behavior for your environment.
 
+## Headscale UI
+
+This chart can optionally deploy the community Headscale UI from `gurucomputing/headscale-ui`.
+
+- Enable by setting `ui.enabled` to `true`.
+- A separate `Service` named `<release>-headscale-ui` is created on port `ui.service.port` (default 80).
+- If `ingress.enabled` is also `true`, an additional `Ingress` is created for the UI using `ui.ingress.*` (host, path, pathType, annotations, tls). The UI Ingress uses the same `ingress.className` as the main service.
+
+Example snippet:
+
+```yaml
+ui:
+  enabled: true
+  headscaleUrl: "http://my-release-headscale.default.svc.cluster.local:8080" # optional, defaults to internal service
+  ingress:
+    host: headscale-ui.example.com
+    path: /
+    pathType: ImplementationSpecific
+    tls:
+      - secretName: headscale-ui-tls
+        hosts: [headscale-ui.example.com]
+```
+
 ## Installing the Chart
 
 To install the chart with the release name `my-release`:
