@@ -1,0 +1,39 @@
+# Binaries for programs
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test and build artifacts
+*.o
+*.a
+*.obj
+*.pyc
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Helm specific ignores
+# Ignore generated README.md in the chart directory
+headscale/README.md

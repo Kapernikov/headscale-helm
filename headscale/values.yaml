@@ -1,0 +1,132 @@
+# Default values for headscale.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: headscale/headscale
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "v0.26.1"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+  #  kubernetes.io/ingress.class: nginx
+  #  kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: "headscale.local"
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: headscale-tls
+  #    hosts:
+  #      - headscale.local
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+# Persistence configuration
+persistence:
+  enabled: true
+  size: 1Gi
+  mountPath: /var/lib/headscale
+
+# Headscale configuration
+configMap:
+  create: true
+
+config:
+  server_url: http://headscale-test.default.svc.cluster.local:8080
+  listen_addr: 0.0.0.0:8080
+  noise:
+    private_key_path: /var/lib/headscale/noise_private.key
+  dns:
+    magic_dns: true
+    base_domain: headscale.local
+    override_local_dns: true
+    nameservers:
+      global:
+        - 1.1.1.1
+        - 8.8.8.8
+  prefixes:
+    v4: 100.64.0.0/10
+    v6: fd7a:115c:a1e0::/48
+  database:
+    type: sqlite
+    sqlite:
+      path: /var/lib/headscale/db.sqlite
+  derp:
+    urls:
+      - https://controlplane.tailscale.com/derpmap/default
+
+# Client configuration
+client:
+  enabled: true
+  image:
+    repository: tailscale/tailscale
+    pullPolicy: IfNotPresent
+    tag: "latest"

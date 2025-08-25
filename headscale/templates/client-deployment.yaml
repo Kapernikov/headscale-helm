@@ -1,0 +1,51 @@
+{{- if .Values.client.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "headscale.fullname" . }}-client
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+    app.kubernetes.io/component: client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "headscale.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: client
+  template:
+    metadata:
+      labels:
+        {{- include "headscale.labels" . | nindent 8 }}
+        app.kubernetes.io/component: client
+    spec:
+      volumes:
+      - name: dev-net-tun
+        hostPath:
+          path: /dev/net/tun
+          type: CharDevice
+      containers:
+      - name: tailscale
+        image: "{{ .Values.client.image.repository }}:{{ .Values.client.image.tag }}"
+        imagePullPolicy: {{ .Values.client.image.pullPolicy }}
+        env:
+        - name: AUTH_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "headscale.fullname" . }}-client-authkey
+              key: authkey
+        command:
+        - /bin/sh
+        - -c
+        - |
+          tailscaled & # Start the daemon in the background
+          tailscale up --authkey=$AUTH_KEY --hostname={{ .Chart.Name }}-client --login-server=http://{{ include "headscale.fullname" . }}:8080
+          wait $! # Wait for tailscaled to exit, or for tailscale up to fail
+          tail -f /dev/null # Keep the container alive
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+        volumeMounts:
+        - name: dev-net-tun
+          mountPath: /dev/net/tun
+{{- end }}
