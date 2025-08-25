@@ -162,6 +162,12 @@ client:
       repository: tailscale/tailscale
       pullPolicy: IfNotPresent
       tag: "latest"
+  # Image used by the preauth key creation Job (helm hook)
+  job:
+    image:
+      repository: alpine/k8s
+      tag: "1.30.2"
+      pullPolicy: IfNotPresent
 
 # Optional Headscale UI
 ui:
