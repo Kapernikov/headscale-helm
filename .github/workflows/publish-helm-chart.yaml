@@ -15,6 +15,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Update Chart version from release tag
+        run: |
+          RELEASE_VERSION=${{ github.ref_name }}
+          # Remove 'v' prefix if present (e.g., v1.0.0 -> 1.0.0)
+          CHART_VERSION=$(echo "$RELEASE_VERSION" | sed 's/^v//')
+          yq e '.version = "'"$CHART_VERSION"'"' -i ./headscale/Chart.yaml
+          echo "Updated Chart.yaml version to $CHART_VERSION"
+
       - name: Set up Helm
         uses: azure/setup-helm@v4
         with:
