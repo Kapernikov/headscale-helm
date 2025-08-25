@@ -5,6 +5,8 @@
   http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .path }}
   {{- end }}
 {{- end }}
+  
+  Note: The Headscale config `server_url` must match your external hostname. When `ingress.enabled` is true and `config.server_url` is empty, the chart sets it to the first ingress host above with the appropriate scheme.
 {{- if .Values.ui.enabled }}
   UI:
   http{{ if $.Values.ui.ingress.tls }}s{{ end }}://{{ $.Values.ui.ingress.host }}{{ $.Values.ui.ingress.path }}

@@ -26,6 +26,8 @@ The chart provides an option to expose the Headscale service via an Ingress reso
 
 You can enable Ingress by setting `ingress.enabled` to `true` in `values.yaml`. You can also configure the Ingress class, hosts, TLS settings, and annotations to customize its behavior for your environment.
 
+Important: the Headscale `server_url` must match the external hostname clients use (typically your Ingress host). This chart auto-populates `config.server_url` from the first `ingress.hosts[].host` when `ingress.enabled` is true and `config.server_url` is empty. If you set `config.server_url` explicitly, ensure it matches your Ingress hostname and scheme (https when TLS is enabled), otherwise clients may fail to connect with noise/decrypt errors.
+
 WebSockets must be supported by your ingress for Headscale to work correctly. For ingress-nginx, the chart defaults include annotations enabling WebSockets and long-lived timeouts:
 
 ```yaml
@@ -93,7 +95,7 @@ $ helm install my-release foo-bar/headscale
 | config.noise.private_key_path | string | `"/var/lib/headscale/noise_private.key"` |  |
 | config.prefixes.v4 | string | `"100.64.0.0/10"` |  |
 | config.prefixes.v6 | string | `"fd7a:115c:a1e0::/48"` |  |
-| config.server_url | string | `"http://headscale-test.default.svc.cluster.local:8080"` |  |
+| config.server_url | string | `""` | When empty and ingress.enabled=true, derived from ingress host; otherwise defaults to internal service URL. Must match external hostname.
 | configMap.create | bool | `true` |  |
 | fullnameOverride | string | `""` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |

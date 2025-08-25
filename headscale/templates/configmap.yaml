@@ -7,5 +7,17 @@ metadata:
     {{- include "headscale.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    {{- toYaml .Values.config | nindent 4 }}
+    {{- /* Prepare a copy of the config values so we can mutate server_url */ -}}
+    {{- $cfg := dict -}}
+    {{- $cfg = merge $cfg .Values.config -}}
+    {{- /* If ingress is enabled and no explicit server_url is provided, derive it from ingress host and TLS */ -}}
+    {{- if and .Values.ingress.enabled (or (not (hasKey .Values.config "server_url")) (empty .Values.config.server_url)) -}}
+      {{- $scheme := ternary "https" "http" (gt (len .Values.ingress.tls) 0) -}}
+      {{- $host := (index .Values.ingress.hosts 0).host -}}
+      {{- $_ := set $cfg "server_url" (printf "%s://%s" $scheme $host) -}}
+    {{- else if not (hasKey .Values.config "server_url") -}}
+      {{- /* Default to internal service URL if nothing else is set and no ingress */ -}}
+      {{- $_ := set $cfg "server_url" (printf "http://%s.%s.svc.cluster.local:%v" (include "headscale.fullname" .) .Release.Namespace .Values.service.port) -}}
+    {{- end -}}
+    {{- toYaml $cfg | nindent 4 }}
 {{- end }}

@@ -35,7 +35,8 @@ spec:
         - /bin/sh
         - -c
         - |
-          set -Eeuo pipefail
+          # Use POSIX-safe options; avoid bash-only flags
+          set -eu
           AUTH_FILE="/etc/client-auth/authkey"
           echo "[client] Waiting for preauth key at $AUTH_FILE ..."
           # Try up to ~10 minutes for the Secret to appear via projected volume

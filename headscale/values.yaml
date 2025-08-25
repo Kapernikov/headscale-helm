@@ -129,7 +129,10 @@ configMap:
   create: true
 
 config:
-  server_url: http://headscale-test.default.svc.cluster.local:8080
+  # When ingress.enabled is true and this is empty, the chart will set
+  # server_url to the scheme+host of the first ingress host, so it matches
+  # the external hostname used by clients.
+  server_url: ""
   listen_addr: 0.0.0.0:8080
   noise:
     private_key_path: /var/lib/headscale/noise_private.key
