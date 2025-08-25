@@ -28,6 +28,6 @@ jobs:
 
       - name: Push Helm chart to GHCR
         run: |
-          CHART_NAME=$(helm show chart ./headscale | grep '^name:' | awk '{print $2}')
-          CHART_VERSION=$(helm show chart ./headscale | grep '^version:' | awk '{print $2}')
+          CHART_NAME=$(grep '^name:' ./headscale/Chart.yaml | awk '{print $2}')
+          CHART_VERSION=$(grep '^version:' ./headscale/Chart.yaml | awk '{print $2}')
           helm push ${CHART_NAME}-${CHART_VERSION}.tgz oci://ghcr.io/${{ github.repository }}
