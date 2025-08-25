@@ -34,6 +34,4 @@ Thumbs.db
 *.swp
 *.swo
 
-# Helm specific ignores
-# Ignore generated README.md in the chart directory
-headscale/README.md
+
