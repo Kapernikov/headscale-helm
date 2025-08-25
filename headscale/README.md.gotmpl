@@ -1,8 +1,7 @@
-# headscale
+{{ template "chart.header" . }}
+{{ template "chart.description" . }}
 
-![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.23.0](https://img.shields.io/badge/AppVersion-0.23.0-informational?style=flat-square)
-
-A Helm chart for deploying Headscale, an open-source implementation of the Tailscale control server.
+{{ template "chart.versionBadge" . }}{{ template "chart.typeBadge" . }}{{ template "chart.appVersionBadge" . }}
 
 ## Client Container
 
@@ -26,3 +25,18 @@ By default, persistence is enabled with a 1Gi volume. You can configure the size
 The chart provides an option to expose the Headscale service via an Ingress resource. This allows you to access your Headscale instance from outside the Kubernetes cluster using a domain name.
 
 You can enable Ingress by setting `ingress.enabled` to `true` in `values.yaml`. You can also configure the Ingress class, hosts, TLS settings, and annotations to customize its behavior for your environment.
+
+## Installing the Chart
+
+To install the chart with the release name `my-release`:
+
+```console
+$ helm repo add foo-bar http://charts.foo-bar.com
+$ helm install my-release foo-bar/{{ template "chart.name" . }}
+```
+
+{{ template "chart.requirementsSection" . }}
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "helm-docs.versionFooter" . }}
