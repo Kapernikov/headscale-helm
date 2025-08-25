@@ -159,14 +159,6 @@ client:
       repository: tailscale/tailscale
       pullPolicy: IfNotPresent
       tag: "latest"
-  authKeyJob:
-    enabled: true
-    useHook: true
-    # When useHook=false (regular Job), automatically clean up after finish
-    ttlSecondsAfterFinished: 300
-    backoffLimit: 1
-    activeDeadlineSeconds: 600
-    waitReadyTimeoutSeconds: 300
 
 # Optional Headscale UI
 ui:
