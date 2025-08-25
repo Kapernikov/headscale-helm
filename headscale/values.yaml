@@ -151,9 +151,9 @@ config:
       - https://controlplane.tailscale.com/derpmap/default
 
 # Client configuration
-  client:
-    enabled: true
-    image:
+client:
+  enabled: true
+  image:
       repository: tailscale/tailscale
       pullPolicy: IfNotPresent
       tag: "latest"
