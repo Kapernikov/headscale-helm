@@ -6,6 +6,8 @@ metadata:
     {{- include "headscale.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
 spec:
+  strategy:
+    type: Recreate
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
