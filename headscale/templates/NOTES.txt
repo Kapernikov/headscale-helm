@@ -9,7 +9,9 @@
   Note: The Headscale config `server_url` must match your external hostname. When `ingress.enabled` is true and `config.server_url` is empty, the chart sets it to the first ingress host above with the appropriate scheme.
 {{- if .Values.ui.enabled }}
   UI:
-  http{{ if $.Values.ui.ingress.tls }}s{{ end }}://{{ $.Values.ui.ingress.host }}{{ $.Values.ui.ingress.path }}
+  {{- $scheme := ternary "https" "http" (gt (len $.Values.ingress.tls) 0) -}}
+  {{- $host := (index $.Values.ingress.hosts 0).host -}}
+  {{$scheme}}://{{$host}}{{ $.Values.ui.ingress.path }}
 {{- end }}
 {{- else if contains "NodePort" .Values.service.type }}
   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "headscale.fullname" . }})

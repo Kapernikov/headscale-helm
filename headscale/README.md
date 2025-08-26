@@ -41,25 +41,31 @@ If you use another ingress controller, configure equivalent settings to allow We
 
 ## Headscale UI
 
-This chart can optionally deploy the community Headscale UI from `gurucomputing/headscale-ui`.
+This chart can optionally deploy the community Headscale UI (`gurucomputing/headscale-ui`).
 
 - Enable by setting `ui.enabled` to `true`.
 - A separate `Service` named `<release>-headscale-ui` is created on port `ui.service.port` (default 80).
-- If `ingress.enabled` is also `true`, an additional `Ingress` is created for the UI using `ui.ingress.*` (host, path, pathType, annotations, tls). The UI Ingress uses the same `ingress.className` as the main service.
+- When `ingress.enabled=true`, the UI is exposed on the same hostname as Headscale under a subpath (default `/web`). The UI has its own `Ingress` resource that targets the same host as the main ingress, with its path set from `ui.ingress.path`.
+- `HEADSCALE_URL` defaults to the external scheme+host from the main Ingress when Ingress is enabled; otherwise it falls back to the internal cluster service. You can override via `ui.headscaleUrl`.
 
 Example snippet:
 
 ```yaml
+ingress:
+  enabled: true
+  hosts:
+    - host: headscale.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
 ui:
   enabled: true
-  headscaleUrl: "http://my-release-headscale.default.svc.cluster.local:8080" # optional, defaults to internal service
+  # Optional override; by default uses https://headscale.example.com when TLS is enabled
+  # headscaleUrl: "https://headscale.example.com"
   ingress:
-    host: headscale-ui.example.com
-    path: /
+    path: /web
     pathType: ImplementationSpecific
-    tls:
-      - secretName: headscale-ui-tls
-        hosts: [headscale-ui.example.com]
 ```
 
 ## Installing the Chart
@@ -79,10 +85,13 @@ $ helm install my-release foo-bar/headscale
 | autoscaling.maxReplicas | int | `100` |  |
 | autoscaling.minReplicas | int | `1` |  |
 | autoscaling.targetCPUUtilizationPercentage | int | `80` |  |
-| config.client.enabled | bool | `true` |  |
-| config.client.image.pullPolicy | string | `"IfNotPresent"` |  |
-| config.client.image.repository | string | `"tailscale/tailscale"` |  |
-| config.client.image.tag | string | `"latest"` |  |
+| client.enabled | bool | `true` |  |
+| client.image.pullPolicy | string | `"IfNotPresent"` |  |
+| client.image.repository | string | `"tailscale/tailscale"` |  |
+| client.image.tag | string | `"latest"` |  |
+| client.job.image.pullPolicy | string | `"IfNotPresent"` |  |
+| client.job.image.repository | string | `"alpine/k8s"` |  |
+| client.job.image.tag | string | `"1.30.2"` |  |
 | config.database.sqlite.path | string | `"/var/lib/headscale/db.sqlite"` |  |
 | config.database.type | string | `"sqlite"` |  |
 | config.derp.urls[0] | string | `"https://controlplane.tailscale.com/derpmap/default"` |  |
@@ -95,14 +104,18 @@ $ helm install my-release foo-bar/headscale
 | config.noise.private_key_path | string | `"/var/lib/headscale/noise_private.key"` |  |
 | config.prefixes.v4 | string | `"100.64.0.0/10"` |  |
 | config.prefixes.v6 | string | `"fd7a:115c:a1e0::/48"` |  |
-| config.server_url | string | `""` | When empty and ingress.enabled=true, derived from ingress host; otherwise defaults to internal service URL. Must match external hostname.
+| config.server_url | string | `""` |  |
 | configMap.create | bool | `true` |  |
 | fullnameOverride | string | `""` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"headscale/headscale"` |  |
 | image.tag | string | `"v0.26.1"` |  |
 | imagePullSecrets | list | `[]` |  |
-| ingress.annotations | object | `{"nginx.ingress.kubernetes.io/enable-websocket":"\"true\"","nginx.ingress.kubernetes.io/proxy-read-timeout":"\"3600\"","nginx.ingress.kubernetes.io/proxy-send-timeout":"\"3600\""}` |  |
+| ingress.annotations."nginx.ingress.kubernetes.io/client-body-buffer-size" | string | `"1m"` |  |
+| ingress.annotations."nginx.ingress.kubernetes.io/enable-websocket" | string | `"true"` |  |
+| ingress.annotations."nginx.ingress.kubernetes.io/proxy-body-size" | string | `"8000m"` |  |
+| ingress.annotations."nginx.ingress.kubernetes.io/proxy-read-timeout" | string | `"3600"` |  |
+| ingress.annotations."nginx.ingress.kubernetes.io/proxy-send-timeout" | string | `"3600"` |  |
 | ingress.className | string | `"nginx"` |  |
 | ingress.enabled | bool | `false` |  |
 | ingress.hosts[0].host | string | `"headscale.local"` |  |
@@ -136,31 +149,18 @@ $ helm install my-release foo-bar/headscale
 | serviceAccount.create | bool | `true` |  |
 | serviceAccount.name | string | `""` |  |
 | ui.enabled | bool | `false` |  |
-| ui.enabled | bool | `false` |  |
-| ui.env | object | `{}` |  |
 | ui.extraEnv | list | `[]` |  |
 | ui.headscaleUrl | string | `""` |  |
 | ui.image.pullPolicy | string | `"IfNotPresent"` |  |
-| ui.image.pullPolicy | string | `"IfNotPresent"` |  |
-| ui.image.repository | string | `"ghcr.io/gurucomputing/headscale-ui"` |  |
 | ui.image.repository | string | `"ghcr.io/gurucomputing/headscale-ui"` |  |
 | ui.image.tag | string | `"latest"` |  |
-| ui.image.tag | string | `"latest"` |  |
 | ui.ingress.annotations | object | `{}` |  |
-| ui.ingress.annotations | object | `{}` |  |
-| ui.ingress.className | string | `"nginx"` |  |
-| ui.ingress.host | string | `"ui.headscale.local"` |  |
-| ui.ingress.hosts[0].host | string | `"headscale-ui.local"` |  |
-| ui.ingress.hosts[0].paths[0].path | string | `"/"` |  |
-| ui.ingress.hosts[0].paths[0].pathType | string | `"ImplementationSpecific"` |  |
-| ui.ingress.path | string | `"/"` |  |
+| ui.ingress.host | string | `""` |  |
+| ui.ingress.path | string | `"/web"` |  |
 | ui.ingress.pathType | string | `"ImplementationSpecific"` |  |
-| ui.ingress.tls | list | `[]` |  |
 | ui.ingress.tls | list | `[]` |  |
 | ui.replicaCount | int | `1` |  |
 | ui.service.port | int | `80` |  |
-| ui.service.port | int | `80` |  |
-| ui.service.type | string | `"ClusterIP"` |  |
 | ui.service.type | string | `"ClusterIP"` |  |
 
 ----------------------------------------------

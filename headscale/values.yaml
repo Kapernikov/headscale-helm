@@ -77,8 +77,8 @@ ui:
   extraEnv: []
   # UI ingress is created only when ui.enabled and ingress.enabled are both true
   ingress:
-    host: "ui.headscale.local"
-    path: "/"
+    host: "" # defaults to first host from ingress.hosts when empty
+    path: "/web"
     pathType: ImplementationSpecific
     annotations: {}
     tls: []
@@ -169,29 +169,4 @@ client:
       tag: "1.30.2"
       pullPolicy: IfNotPresent
 
-# Optional Headscale UI
-ui:
-  enabled: false
-  image:
-    repository: ghcr.io/gurucomputing/headscale-ui
-    tag: "latest"
-    pullPolicy: IfNotPresent
-  # Extra environment variables for the UI container
-  env: {}
-  service:
-    type: ClusterIP
-    port: 80
-  # When ui.enabled and ingress.enabled are true, an extra Ingress
-  # is created for the UI using the settings below.
-  ingress:
-    className: "nginx"
-    annotations: {}
-    hosts:
-      - host: "headscale-ui.local"
-        paths:
-          - path: /
-            pathType: ImplementationSpecific
-    tls: []
-    # - secretName: headscale-ui-tls
-    #   hosts:
-    #     - headscale-ui.local
+# (UI values defined above; duplicate block removed)

@@ -32,7 +32,23 @@ spec:
               protocol: TCP
           env:
             - name: HEADSCALE_URL
-              value: "{{ .Values.ui.headscaleUrl | default (printf "http://%s:%d" (include "headscale.fullname" .) (.Values.service.port | int)) }}"
+              {{- /*
+                   Default precedence for HEADSCALE_URL:
+                   1) .Values.ui.headscaleUrl if provided
+                   2) If ingress is enabled, derive from ingress host + TLS scheme
+                   3) Fallback to the internal service URL
+                */ -}}
+              {{- $url := .Values.ui.headscaleUrl -}}
+              {{- if or (not $url) (eq $url "") -}}
+                {{- if .Values.ingress.enabled -}}
+                  {{- $scheme := ternary "https" "http" (gt (len .Values.ingress.tls) 0) -}}
+                  {{- $host := (index .Values.ingress.hosts 0).host -}}
+                  {{- $url = printf "%s://%s" $scheme $host -}}
+                {{- else -}}
+                  {{- $url = printf "http://%s:%d" (include "headscale.fullname" .) (.Values.service.port | int) -}}
+                {{- end -}}
+              {{- end -}}
+              value: "{{ $url }}"
           {{- with .Values.ui.extraEnv }}
           {{- if . }}
           {{- range . }}
@@ -42,4 +58,3 @@ spec:
           {{- end }}
           {{- end }}
 {{- end }}
-

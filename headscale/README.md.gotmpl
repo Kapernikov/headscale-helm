@@ -40,25 +40,31 @@ If you use another ingress controller, configure equivalent settings to allow We
 
 ## Headscale UI
 
-This chart can optionally deploy the community Headscale UI from `gurucomputing/headscale-ui`.
+This chart can optionally deploy the community Headscale UI (`gurucomputing/headscale-ui`).
 
 - Enable by setting `ui.enabled` to `true`.
 - A separate `Service` named `<release>-headscale-ui` is created on port `ui.service.port` (default 80).
-- If `ingress.enabled` is also `true`, an additional `Ingress` is created for the UI using `ui.ingress.*` (host, path, pathType, annotations, tls). The UI Ingress uses the same `ingress.className` as the main service.
+- When `ingress.enabled=true`, the UI is exposed on the same hostname as Headscale under a subpath (default `/web`). The UI has its own `Ingress` resource that targets the same host as the main ingress, with its path set from `ui.ingress.path`.
+- `HEADSCALE_URL` defaults to the external scheme+host from the main Ingress when Ingress is enabled; otherwise it falls back to the internal cluster service. You can override via `ui.headscaleUrl`.
 
 Example snippet:
 
 ```yaml
+ingress:
+  enabled: true
+  hosts:
+    - host: headscale.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
 ui:
   enabled: true
-  headscaleUrl: "http://my-release-headscale.default.svc.cluster.local:8080" # optional, defaults to internal service
+  # Optional override; by default uses https://headscale.example.com when TLS is enabled
+  # headscaleUrl: "https://headscale.example.com"
   ingress:
-    host: headscale-ui.example.com
-    path: /
+    path: /web
     pathType: ImplementationSpecific
-    tls:
-      - secretName: headscale-ui-tls
-        hosts: [headscale-ui.example.com]
 ```
 
 ## Installing the Chart

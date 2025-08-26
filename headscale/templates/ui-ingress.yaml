@@ -13,9 +13,14 @@ metadata:
   {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
-  {{- if .Values.ui.ingress.tls }}
+  {{- /* Use UI TLS settings if provided, otherwise fall back to main ingress TLS */ -}}
+  {{- $uiTls := .Values.ui.ingress.tls | default list -}}
+  {{- if not $uiTls }}
+    {{- $uiTls = .Values.ingress.tls | default list -}}
+  {{- end }}
+  {{- if $uiTls }}
   tls:
-    {{- range .Values.ui.ingress.tls }}
+    {{- range $uiTls }}
     - hosts:
         {{- range .hosts }}
         - {{ . | quote }}
@@ -24,7 +29,14 @@ spec:
     {{- end }}
   {{- end }}
   rules:
-    - host: {{ .Values.ui.ingress.host | quote }}
+    {{- /* Determine UI host: prefer ui.ingress.host, else first main ingress host */ -}}
+    {{- $uiHost := .Values.ui.ingress.host -}}
+    {{- if or (not $uiHost) (eq $uiHost "") }}
+      {{- if gt (len .Values.ingress.hosts) 0 -}}
+        {{- $uiHost = (index .Values.ingress.hosts 0).host -}}
+      {{- end -}}
+    {{- end -}}
+    - host: {{ $uiHost | quote }}
       http:
         paths:
           - path: {{ .Values.ui.ingress.path }}
@@ -35,4 +47,3 @@ spec:
                 port:
                   name: http
 {{- end }}
-
