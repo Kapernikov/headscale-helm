@@ -1,0 +1,14 @@
+{{- $extra := .Values.extraDnsRecords -}}
+{{- if and $extra.enabled $extra.configMap.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ default (printf "%s-extra-dns" (include "headscale.fullname" .)) $extra.configMap.name }}
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+data:
+  {{- $key := default "extra-dns-records.json" $extra.configMap.key }}
+  {{ $key }}: |
+    {{- $records := $extra.records | default (list) -}}
+    {{- toPrettyJson $records | nindent 4 }}
+{{- end }}

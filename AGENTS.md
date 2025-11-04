@@ -27,6 +27,7 @@
   - Ingress: main host routes `/`, UI routes `/web` on same host.
   - UI env: `HEADSCALE_URL` resolves to external host when ingress enabled.
   - PVC: `kubectl get pvc` shows annotation `helm.sh/resource-policy=keep`.
+- Before committing, run `hack/kind-smoke.sh --with-client` to ensure the server and optional Tailscale client deploy cleanly with the latest chart changes.
 
 ## Commit & Pull Request Guidelines
 - Messages: Imperative, concise; scope if useful (e.g., `ui:`, `ingress:`).

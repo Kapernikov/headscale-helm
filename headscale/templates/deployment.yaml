@@ -64,6 +64,16 @@ spec:
             - name: config
               mountPath: /etc/headscale/config.yaml
               subPath: config.yaml
+            {{ if .Values.extraDnsRecords.enabled }}
+            {{- $extra := .Values.extraDnsRecords -}}
+            {{- $dnsConfig := (index .Values.config "dns") | default (dict) -}}
+            {{- $configPath := (index $dnsConfig "extra_records_path") | default "" -}}
+            {{- $mountPath := coalesce $extra.path $configPath "/etc/headscale/extra-dns-records.json" -}}
+            - name: extra-dns-records
+              mountPath: {{ $mountPath }}
+              subPath: {{ default "extra-dns-records.json" .Values.extraDnsRecords.configMap.key }}
+              readOnly: true
+            {{- end }}
       volumes:
         {{- if .Values.persistence.enabled }}
         - name: data
@@ -73,6 +83,18 @@ spec:
         - name: config
           configMap:
             name: {{ include "headscale.fullname" . }}
+        {{ if .Values.extraDnsRecords.enabled }}
+        {{- $extra := .Values.extraDnsRecords -}}
+        {{- $cmName := "" -}}
+        {{- if $extra.configMap.create -}}
+          {{- $cmName = default (printf "%s-extra-dns" (include "headscale.fullname" .)) $extra.configMap.name -}}
+        {{- else -}}
+          {{- $cmName = required "extraDnsRecords.configMap.name must be set when extraDnsRecords.configMap.create is false" $extra.configMap.name -}}
+        {{- end }}
+        - name: extra-dns-records
+          configMap:
+            name: {{ $cmName }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

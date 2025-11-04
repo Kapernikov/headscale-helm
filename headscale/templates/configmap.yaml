@@ -15,9 +15,21 @@ data:
       {{- $scheme := ternary "https" "http" (gt (len .Values.ingress.tls) 0) -}}
       {{- $host := (index .Values.ingress.hosts 0).host -}}
       {{- $_ := set $cfg "server_url" (printf "%s://%s" $scheme $host) -}}
-    {{- else if not (hasKey .Values.config "server_url") -}}
-      {{- /* Default to internal service URL if nothing else is set and no ingress */ -}}
+    {{- else if or (not (hasKey .Values.config "server_url")) (empty .Values.config.server_url) -}}
+      {{- /* Default to internal service URL if nothing else is set */ -}}
       {{- $_ := set $cfg "server_url" (printf "http://%s.%s.svc.cluster.local:%v" (include "headscale.fullname" .) .Release.Namespace .Values.service.port) -}}
+    {{- end -}}
+    {{- if .Values.extraDnsRecords.enabled -}}
+      {{- $dnsConfigInValues := (index .Values.config "dns") | default (dict) -}}
+      {{- $configPath := (index $dnsConfigInValues "extra_records_path") | default "" -}}
+      {{- $path := coalesce .Values.extraDnsRecords.path $configPath "/etc/headscale/extra-dns-records.json" -}}
+      {{- if not (hasKey $cfg "dns") -}}
+        {{- $_ := set $cfg "dns" (dict) -}}
+      {{- end -}}
+      {{- $dns := index $cfg "dns" -}}
+      {{- if not (hasKey $dns "extra_records_path") -}}
+        {{- $_ := set $dns "extra_records_path" $path -}}
+      {{- end -}}
     {{- end -}}
     {{- toYaml $cfg | nindent 4 }}
 {{- end }}

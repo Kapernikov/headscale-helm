@@ -2,7 +2,7 @@
 
 A Helm chart for deploying Headscale, an open-source implementation of the Tailscale control server.
 
-![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.23.0](https://img.shields.io/badge/AppVersion-0.23.0-informational?style=flat-square)
+![Version: 0.1.2](https://img.shields.io/badge/Version-0.1.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.27.0](https://img.shields.io/badge/AppVersion-0.27.0-informational?style=flat-square)
 
 ## Client Container
 
@@ -39,6 +39,41 @@ ingress:
 ```
 If you use another ingress controller, configure equivalent settings to allow WebSocket upgrades and long read/send timeouts.
 
+## Extra DNS Records
+
+Headscale can serve additional MagicDNS entries by pointing `dns.extra_records_path` at a JSON file. The chart wires this up through `extraDnsRecords`, letting you either supply records inline or reference an existing ConfigMap.
+
+- Set `extraDnsRecords.enabled=true` to mount a JSON file and set `dns.extra_records_path`.
+- When `extraDnsRecords.configMap.create=true` (default), the chart renders the list under `extraDnsRecords.records` into a ConfigMap.
+- To reuse an existing ConfigMap, set `extraDnsRecords.configMap.create=false` and provide the `name`/`key` that contain your JSON payload.
+
+Inline example:
+
+```yaml
+extraDnsRecords:
+  enabled: true
+  path: /etc/headscale/extra-dns-records.json
+  records:
+    - name: grafana.internal.example.com
+      type: A
+      value: 100.64.0.10
+    - name: prometheus.internal.example.com
+      type: A
+      value: 100.64.0.10
+```
+
+Referencing an existing ConfigMap:
+
+```yaml
+extraDnsRecords:
+  enabled: true
+  configMap:
+    create: false
+    name: shared-dns-records
+    key: records.json
+  path: /etc/headscale/extra-dns-records.json
+```
+
 ## Headscale UI
 
 This chart can optionally deploy the community Headscale UI (`gurucomputing/headscale-ui`).
@@ -64,8 +99,24 @@ ui:
   # Optional override; by default uses https://headscale.example.com when TLS is enabled
   # headscaleUrl: "https://headscale.example.com"
   ingress:
-    path: /web
-    pathType: ImplementationSpecific
+  path: /web
+  pathType: ImplementationSpecific
+```
+
+## Local Testing with kind
+
+For a quick local smoke test you can use [kind](https://kind.sigs.k8s.io). The repository provides `hack/kind-smoke.sh`, which spins up a temporary kind cluster, installs the chart (with sample extra DNS records), verifies readiness, and tears everything down by default.
+
+```console
+$ hack/kind-smoke.sh
+```
+
+Use `hack/kind-smoke.sh --keep` to retain the cluster for further inspection.
+
+Pass `--with-client` if you also want to deploy the optional Tailscale sidecar and verify the hook/job flow:
+
+```console
+$ hack/kind-smoke.sh --with-client
 ```
 
 ## Installing the Chart
@@ -106,10 +157,16 @@ $ helm install my-release foo-bar/headscale
 | config.prefixes.v6 | string | `"fd7a:115c:a1e0::/48"` |  |
 | config.server_url | string | `""` |  |
 | configMap.create | bool | `true` |  |
+| extraDnsRecords.configMap.create | bool | `true` |  |
+| extraDnsRecords.configMap.key | string | `"extra-dns-records.json"` |  |
+| extraDnsRecords.configMap.name | string | `""` |  |
+| extraDnsRecords.enabled | bool | `false` |  |
+| extraDnsRecords.path | string | `"/etc/headscale/extra-dns-records.json"` |  |
+| extraDnsRecords.records | list | `[]` |  |
 | fullnameOverride | string | `""` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"headscale/headscale"` |  |
-| image.tag | string | `"v0.26.1"` |  |
+| image.tag | string | `"v0.27.0"` |  |
 | imagePullSecrets | list | `[]` |  |
 | ingress.annotations."nginx.ingress.kubernetes.io/client-body-buffer-size" | string | `"1m"` |  |
 | ingress.annotations."nginx.ingress.kubernetes.io/enable-websocket" | string | `"true"` |  |
