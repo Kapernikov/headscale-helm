@@ -59,6 +59,10 @@ spec:
             - name: data
               mountPath: /var/lib/headscale
             {{- end }}
+            {{- if .Values.runtime.socketDir }}
+            - name: runtime
+              mountPath: {{ .Values.runtime.socketDir }}
+            {{- end }}
             - name: config
               mountPath: /etc/headscale/config.yaml
               subPath: config.yaml
@@ -77,6 +81,10 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "headscale.fullname" . }}
+        {{- end }}
+        {{- if .Values.runtime.socketDir }}
+        - name: runtime
+          emptyDir: {}
         {{- end }}
         - name: config
           configMap:

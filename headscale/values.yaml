@@ -20,16 +20,21 @@ serviceAccount:
 podAnnotations: {}
 podLabels: {}
 
-podSecurityContext: {}
-  # fsGroup: 2000
+podSecurityContext:
+  fsGroup: 1000
 
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false # Headscale creates its admin socket on the root filesystem.
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+
+runtime:
+  socketDir: /var/run/headscale
 
 service:
   type: ClusterIP
