@@ -167,7 +167,7 @@ client:
   image:
       repository: tailscale/tailscale
       pullPolicy: IfNotPresent
-      tag: "latest"
+      tag: "stable"
   # Image used by the preauth key creation Job (helm hook)
   job:
     image:
