@@ -118,6 +118,10 @@ Pass `--with-client` if you also want to deploy the optional Tailscale sidecar a
 $ hack/kind-smoke.sh --with-client
 ```
 
+## Disruption Budgets
+
+Every workload deployed by the chart (server, UI, and optional client) now includes a PodDisruptionBudget to describe how voluntary disruptions should be handled. By default each budget sets `maxUnavailable: 1`, which lets Kubernetes evict the single replica when needed (e.g., for node drains) without blocking cluster operations. You can toggle or adjust these budgets through `podDisruptionBudget`, `ui.podDisruptionBudget`, and `client.podDisruptionBudget` in `values.yaml`. Set `enabled: false` to skip creating a budget or provide your own `minAvailable`/`maxUnavailable` values to better match your topology.
+
 ## Installing the Chart
 
 To install the chart with the release name `my-release`:

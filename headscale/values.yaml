@@ -20,6 +20,11 @@ serviceAccount:
 podAnnotations: {}
 podLabels: {}
 
+# Pod disruption budget settings for the main Headscale server pods.
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1  # Allow voluntary disruptions to evict the single replica.
+
 podSecurityContext:
   fsGroup: 1000
 
@@ -69,6 +74,10 @@ ui:
     repository: ghcr.io/gurucomputing/headscale-ui
     tag: "latest"
     pullPolicy: IfNotPresent
+  # Pod disruption budget settings for the optional UI deployment.
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
   # Service for the UI
   service:
     type: ClusterIP
@@ -168,6 +177,10 @@ client:
       repository: tailscale/tailscale
       pullPolicy: IfNotPresent
       tag: "stable"
+  # Pod disruption budget settings for the optional client deployment.
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
   # Image used by the preauth key creation Job (helm hook)
   job:
     image:

@@ -2,7 +2,7 @@
 
 A Helm chart for deploying Headscale, an open-source implementation of the Tailscale control server.
 
-![Version: 0.1.2](https://img.shields.io/badge/Version-0.1.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.27.0](https://img.shields.io/badge/AppVersion-0.27.0-informational?style=flat-square)
+![Version: 0.1.4](https://img.shields.io/badge/Version-0.1.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.27.0](https://img.shields.io/badge/AppVersion-0.27.0-informational?style=flat-square)
 
 ## Client Container
 
@@ -119,6 +119,10 @@ Pass `--with-client` if you also want to deploy the optional Tailscale sidecar a
 $ hack/kind-smoke.sh --with-client
 ```
 
+## Disruption Budgets
+
+Every workload deployed by the chart (server, UI, and optional client) now includes a PodDisruptionBudget to describe how voluntary disruptions should be handled. By default each budget sets `maxUnavailable: 1`, which lets Kubernetes evict the single replica when needed (e.g., for node drains) without blocking cluster operations. You can toggle or adjust these budgets through `podDisruptionBudget`, `ui.podDisruptionBudget`, and `client.podDisruptionBudget` in `values.yaml`. Set `enabled: false` to skip creating a budget or provide your own `minAvailable`/`maxUnavailable` values to better match your topology.
+
 ## Installing the Chart
 
 To install the chart with the release name `my-release`:
@@ -135,10 +139,12 @@ $ helm install my-release foo-bar/headscale
 | client.enabled | bool | `true` |  |
 | client.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.image.repository | string | `"tailscale/tailscale"` |  |
-| client.image.tag | string | `"latest"` |  |
+| client.image.tag | string | `"stable"` |  |
 | client.job.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.job.image.repository | string | `"alpine/k8s"` |  |
 | client.job.image.tag | string | `"1.30.2"` |  |
+| client.podDisruptionBudget.enabled | bool | `true` |  |
+| client.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | config.database.sqlite.path | string | `"/var/lib/headscale/db.sqlite"` |  |
 | config.database.type | string | `"sqlite"` |  |
 | config.derp.urls[0] | string | `"https://controlplane.tailscale.com/derpmap/default"` |  |
@@ -164,11 +170,7 @@ $ helm install my-release foo-bar/headscale
 | image.repository | string | `"headscale/headscale"` |  |
 | image.tag | string | `"v0.27.0"` |  |
 | imagePullSecrets | list | `[]` |  |
-| ingress.annotations."nginx.ingress.kubernetes.io/client-body-buffer-size" | string | `"1m"` |  |
-| ingress.annotations."nginx.ingress.kubernetes.io/enable-websocket" | string | `"true"` |  |
-| ingress.annotations."nginx.ingress.kubernetes.io/proxy-body-size" | string | `"8000m"` |  |
-| ingress.annotations."nginx.ingress.kubernetes.io/proxy-read-timeout" | string | `"3600"` |  |
-| ingress.annotations."nginx.ingress.kubernetes.io/proxy-send-timeout" | string | `"3600"` |  |
+| ingress.annotations | string | `nil` |  |
 | ingress.className | string | `"nginx"` |  |
 | ingress.enabled | bool | `false` |  |
 | ingress.hosts[0].host | string | `"headscale.local"` |  |
@@ -185,8 +187,10 @@ $ helm install my-release foo-bar/headscale
 | persistence.enabled | bool | `true` |  |
 | persistence.size | string | `"1Gi"` |  |
 | podAnnotations | object | `{}` |  |
+| podDisruptionBudget.enabled | bool | `true` |  |
+| podDisruptionBudget.maxUnavailable | int | `1` |  |
 | podLabels | object | `{}` |  |
-| podSecurityContext | object | `{}` |  |
+| podSecurityContext.fsGroup | int | `1000` |  |
 | readinessProbe.failureThreshold | int | `3` |  |
 | readinessProbe.httpGet.path | string | `"/health"` |  |
 | readinessProbe.httpGet.port | string | `"http"` |  |
@@ -194,7 +198,13 @@ $ helm install my-release foo-bar/headscale
 | readinessProbe.periodSeconds | int | `5` |  |
 | readinessProbe.timeoutSeconds | int | `3` |  |
 | resources | object | `{}` |  |
-| securityContext | object | `{}` |  |
+| runtime.socketDir | string | `"/var/run/headscale"` |  |
+| securityContext.allowPrivilegeEscalation | bool | `false` |  |
+| securityContext.capabilities.drop[0] | string | `"ALL"` |  |
+| securityContext.readOnlyRootFilesystem | bool | `false` |  |
+| securityContext.runAsGroup | int | `1000` |  |
+| securityContext.runAsNonRoot | bool | `true` |  |
+| securityContext.runAsUser | int | `1000` |  |
 | service.port | int | `8080` |  |
 | service.type | string | `"ClusterIP"` |  |
 | serviceAccount.annotations | object | `{}` |  |
@@ -211,6 +221,8 @@ $ helm install my-release foo-bar/headscale
 | ui.ingress.path | string | `"/web"` |  |
 | ui.ingress.pathType | string | `"ImplementationSpecific"` |  |
 | ui.ingress.tls | list | `[]` |  |
+| ui.podDisruptionBudget.enabled | bool | `true` |  |
+| ui.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | ui.service.port | int | `80` |  |
 | ui.service.type | string | `"ClusterIP"` |  |
 

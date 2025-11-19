@@ -1,0 +1,22 @@
+{{- if and .Values.client.enabled (.Values.client.podDisruptionBudget.enabled | default false) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "headscale.fullname" . }}-client
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+    app.kubernetes.io/component: client
+spec:
+  selector:
+    matchLabels:
+      {{- include "headscale.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: client
+  {{- $pdb := .Values.client.podDisruptionBudget }}
+  {{- if hasKey $pdb "minAvailable" }}
+  minAvailable: {{ $pdb.minAvailable }}
+  {{- else if hasKey $pdb "maxUnavailable" }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  maxUnavailable: 1
+  {{- end }}
+{{- end }}
