@@ -7,7 +7,7 @@ metadata:
     {{- include "headscale.labels" . | nindent 4 }}
     app.kubernetes.io/component: ui
 spec:
-  replicas: {{ .Values.ui.replicaCount | default 1 }}
+  replicas: 1
   selector:
     matchLabels:
       {{- include "headscale.selectorLabels" . | nindent 6 }}

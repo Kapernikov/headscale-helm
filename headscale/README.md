@@ -132,10 +132,6 @@ $ helm install my-release foo-bar/headscale
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| autoscaling.enabled | bool | `false` |  |
-| autoscaling.maxReplicas | int | `100` |  |
-| autoscaling.minReplicas | int | `1` |  |
-| autoscaling.targetCPUUtilizationPercentage | int | `80` |  |
 | client.enabled | bool | `true` |  |
 | client.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.image.repository | string | `"tailscale/tailscale"` |  |
@@ -197,7 +193,6 @@ $ helm install my-release foo-bar/headscale
 | readinessProbe.initialDelaySeconds | int | `10` |  |
 | readinessProbe.periodSeconds | int | `5` |  |
 | readinessProbe.timeoutSeconds | int | `3` |  |
-| replicaCount | int | `1` |  |
 | resources | object | `{}` |  |
 | securityContext | object | `{}` |  |
 | service.port | int | `8080` |  |
@@ -216,7 +211,6 @@ $ helm install my-release foo-bar/headscale
 | ui.ingress.path | string | `"/web"` |  |
 | ui.ingress.pathType | string | `"ImplementationSpecific"` |  |
 | ui.ingress.tls | list | `[]` |  |
-| ui.replicaCount | int | `1` |  |
 | ui.service.port | int | `80` |  |
 | ui.service.type | string | `"ClusterIP"` |  |
 
