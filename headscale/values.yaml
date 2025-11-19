@@ -40,11 +40,11 @@ ingress:
   className: "nginx"
   annotations:
     # Websocket support and long-lived connections for ingress-nginx
-    nginx.ingress.kubernetes.io/client-body-buffer-size: 1m
-    nginx.ingress.kubernetes.io/proxy-body-size: 8000m
-    nginx.ingress.kubernetes.io/enable-websocket: "true"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # nginx.ingress.kubernetes.io/client-body-buffer-size: 1m
+    # nginx.ingress.kubernetes.io/proxy-body-size: 8000m
+    # nginx.ingress.kubernetes.io/enable-websocket: "true"
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    # nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
   #  kubernetes.io/ingress.class: nginx
   #  kubernetes.io/tls-acme: "true"
   hosts:
