@@ -35,7 +35,7 @@ spec:
       {{- if gt (len .Values.ingress.hosts) 0 -}}
         {{- $uiHost = (index .Values.ingress.hosts 0).host -}}
       {{- end -}}
-    {{- end -}}
+    {{- end }}
     - host: {{ $uiHost | quote }}
       http:
         paths:

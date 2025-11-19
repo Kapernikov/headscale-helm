@@ -47,7 +47,7 @@ spec:
                 {{- else -}}
                   {{- $url = printf "http://%s:%d" (include "headscale.fullname" .) (.Values.service.port | int) -}}
                 {{- end -}}
-              {{- end -}}
+              {{- end }}
               value: "{{ $url }}"
           {{- with .Values.ui.extraEnv }}
           {{- if . }}
