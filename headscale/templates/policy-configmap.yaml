@@ -1,0 +1,23 @@
+{{- if and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "headscale.fullname" . }}-policy
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+data:
+  policy.json: |
+    {
+      "tagOwners": {
+        "tag:in-cluster-client": ["headscale-system@"]
+      },
+      "autoApprovers": {
+        "routes": {
+          {{- $routes := .Values.client.advertiseRoutes }}
+          {{- range $i, $route := $routes }}
+          {{ $route | quote }}: ["tag:in-cluster-client"]{{ if lt $i (sub (len $routes) 1) }},{{ end }}
+          {{- end }}
+        }
+      }
+    }
+{{- end }}

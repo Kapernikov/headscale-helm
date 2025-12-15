@@ -76,6 +76,12 @@ spec:
               subPath: {{ default "extra-dns-records.json" .Values.extraDnsRecords.configMap.key }}
               readOnly: true
             {{- end }}
+            {{- if and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) }}
+            - name: policy
+              mountPath: /etc/headscale/policy.json
+              subPath: policy.json
+              readOnly: true
+            {{- end }}
       volumes:
         {{- if .Values.persistence.enabled }}
         - name: data
@@ -100,6 +106,11 @@ spec:
         - name: extra-dns-records
           configMap:
             name: {{ $cmName }}
+        {{- end }}
+        {{- if and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) }}
+        - name: policy
+          configMap:
+            name: {{ include "headscale.fullname" . }}-policy
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
