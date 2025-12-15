@@ -136,6 +136,7 @@ $ helm install my-release foo-bar/headscale
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| client.advertiseRoutes | list | `[]` |  |
 | client.enabled | bool | `true` |  |
 | client.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.image.repository | string | `"tailscale/tailscale"` |  |
