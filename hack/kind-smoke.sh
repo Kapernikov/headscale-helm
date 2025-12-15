@@ -24,7 +24,7 @@ Usage: $(basename "$0") [options]
 Options:
   --cluster-name NAME   Override kind cluster name (default: ${CLUSTER_NAME})
   --keep                Do not delete the cluster after the test finishes
-  --with-client         Enable the optional Tailscale client sidecar in the chart
+  --with-client         Enable the optional Tailscale client with advertiseRoutes
   -h, --help            Show this help message
 
 Environment variables:
@@ -115,6 +115,8 @@ if [[ $WITH_CLIENT -eq 1 ]]; then
   cat <<'EOF' >>"$TMP_VALUES"
 client:
   enabled: true
+  advertiseRoutes:
+    - "10.99.0.0/24"
 EOF
 else
   cat <<'EOF' >>"$TMP_VALUES"
@@ -172,6 +174,27 @@ if [[ $WITH_CLIENT -eq 1 ]]; then
   echo "[verify] Ensuring client pod includes tailscaled container"
   if ! kubectl get pods -n headscale -l app.kubernetes.io/component=client -o jsonpath='{.items[0].spec.containers[0].name}' | grep -q 'tailscale'; then
     echo "[ERROR] Tailscale container not found in client deployment" >&2
+    exit 1
+  fi
+
+  echo "[verify] Ensuring policy ConfigMap exists with autoApprovers"
+  POLICY_JSON=$(kubectl get configmap headscale-policy -n headscale -o jsonpath='{.data.policy\.json}')
+  if ! grep -q 'autoApprovers' <<<"$POLICY_JSON"; then
+    echo "[ERROR] autoApprovers not found in policy ConfigMap" >&2
+    exit 1
+  fi
+  if ! grep -q '10.99.0.0/24' <<<"$POLICY_JSON"; then
+    echo "[ERROR] Expected route 10.99.0.0/24 not found in policy ConfigMap" >&2
+    exit 1
+  fi
+  if ! grep -q 'tag:in-cluster-client' <<<"$POLICY_JSON"; then
+    echo "[ERROR] Expected tag:in-cluster-client not found in policy ConfigMap" >&2
+    exit 1
+  fi
+
+  echo "[verify] Ensuring policy.path is set in headscale config"
+  if ! grep -q 'path: /etc/headscale/policy.json' <<<"$CONFIG_YAML"; then
+    echo "[ERROR] policy.path not found in config.yaml" >&2
     exit 1
   fi
 fi

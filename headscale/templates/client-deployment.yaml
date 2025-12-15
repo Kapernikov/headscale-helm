@@ -1,4 +1,5 @@
 {{- if .Values.client.enabled }}
+{{- $hasRoutes := gt (len .Values.client.advertiseRoutes) 0 }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -48,6 +49,13 @@ spec:
             sleep 5
           done
 
+          {{- if $hasRoutes }}
+          # Enable IP forwarding for subnet routing / exit node functionality
+          echo "[client] Enabling IP forwarding"
+          sysctl -w net.ipv4.ip_forward=1
+          sysctl -w net.ipv6.conf.all.forwarding=1
+          {{- end }}
+
           echo "[client] Starting tailscaled"
           tailscaled &
 
@@ -55,7 +63,11 @@ spec:
           if [ -s "$AUTH_FILE" ]; then
             AUTH_KEY=$(cat "$AUTH_FILE")
             echo "[client] Performing tailscale up"
-            tailscale up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client --login-server=http://{{ include "headscale.fullname" . }}:8080 || true
+            tailscale up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client --login-server=http://{{ include "headscale.fullname" . }}:8080 \
+              {{- if $hasRoutes }}
+              --advertise-routes={{ .Values.client.advertiseRoutes | join "," }} \
+              {{- end }}
+              || true
           else
             echo "[client] No preauth key found after timeout; skipping tailscale up for now."
           fi
@@ -64,9 +76,14 @@ spec:
           wait $! || true
           tail -f /dev/null
         securityContext:
+          {{- if $hasRoutes }}
+          # Privileged mode required to set sysctl for IP forwarding
+          privileged: true
+          {{- else }}
           capabilities:
             add:
             - NET_ADMIN
+          {{- end }}
         volumeMounts:
         - name: dev-net-tun
           mountPath: /dev/net/tun

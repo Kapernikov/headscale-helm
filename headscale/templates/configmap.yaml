@@ -31,5 +31,13 @@ data:
         {{- $_ := set $dns "extra_records_path" $path -}}
       {{- end -}}
     {{- end -}}
+    {{- /* Add policy path when client advertises routes */ -}}
+    {{- if and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) -}}
+      {{- if not (hasKey $cfg "policy") -}}
+        {{- $_ := set $cfg "policy" (dict) -}}
+      {{- end -}}
+      {{- $policy := index $cfg "policy" -}}
+      {{- $_ := set $policy "path" "/etc/headscale/policy.json" -}}
+    {{- end -}}
     {{- toYaml $cfg | nindent 4 }}
 {{- end }}

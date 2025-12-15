@@ -177,6 +177,14 @@ client:
       repository: tailscale/tailscale
       pullPolicy: IfNotPresent
       tag: "stable"
+  # Routes to advertise to the Tailscale network.
+  # When configured, IP forwarding is enabled and the client acts as a subnet router.
+  # WARNING: Using "0.0.0.0/0" or "::/0" (exit node mode) will also expose all
+  # Kubernetes pods and services to clients using this exit node. This is probably
+  # not what you want. Consider advertising only specific external subnets instead.
+  # Example:
+  #   - "10.20.0.0/16"    # specific external subnet
+  advertiseRoutes: []
   # Pod disruption budget settings for the optional client deployment.
   podDisruptionBudget:
     enabled: true
