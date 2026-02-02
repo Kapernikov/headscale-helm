@@ -199,7 +199,7 @@ policy:
   tagOwners:
     "tag:in-cluster-client": ["headscale-system@"]
   autoApprovers:
-    routes: []
+    routes: {}
     exit-node: []
   ssh:
     - action: check

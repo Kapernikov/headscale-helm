@@ -34,4 +34,4 @@ Thumbs.db
 *.swp
 *.swo
 
-
+build/

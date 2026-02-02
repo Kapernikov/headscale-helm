@@ -1,7 +1,7 @@
 {{- $policy := .Values.policy }}
 {{- $routes := .Values.client.advertiseRoutes }}
 {{- range $i, $route := $routes }}
-{{- if not contains $route $policy.autoApprovers.routes }}
+{{- if not (hasKey $policy.autoApprovers.routes $route) }}
 {{- $policy := set $policy.autoApprovers.routes $route (list "tag:in-cluster-client") }}
 {{- end }}
 {{- end }}
@@ -14,5 +14,5 @@ metadata:
     {{- include "headscale.labels" . | nindent 4 }}
 data:
   policy.json: |
-    {{ $policy | toPrettyJson | nindent 4 }}
+    {{- $policy | toPrettyJson | nindent 4 }}
 {{- end }}
