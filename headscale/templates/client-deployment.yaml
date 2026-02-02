@@ -24,10 +24,109 @@ spec:
         hostPath:
           path: /dev/net/tun
           type: CharDevice
-      - name: client-auth
-        secret:
-          secretName: {{ include "headscale.fullname" . }}-client-authkey
-          optional: true
+      - name: authkey
+        emptyDir: {}
+      initContainers:
+      - name: create-authkey
+        image: "{{ .Values.client.job.image.repository }}:{{ .Values.client.job.image.tag }}"
+        imagePullPolicy: {{ .Values.client.job.image.pullPolicy }}
+        volumeMounts:
+        - name: authkey
+          mountPath: /run/secrets/headscale
+        env:
+        - name: CLIENT_USER
+          value: "{{ .Values.client.user | default "headscale-system" }}"
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -eu
+          apk add --no-cache jq >/dev/null 2>&1 || { echo "[ERROR] Failed to install jq via apk" >&2; exit 1; }
+
+          APP_NAME="{{ include "headscale.name" . }}"
+          FULLNAME="{{ include "headscale.fullname" . }}"
+          RELEASE_NAME="{{ .Release.Name }}"
+          LABEL_SELECTOR="app.kubernetes.io/component=server,app.kubernetes.io/instance=$RELEASE_NAME"
+          HEADSCALE_CONTAINER="headscale"
+          AUTHKEY_FILE="/run/secrets/headscale/authkey"
+
+          echo "[INFO] Locating a ready headscale pod (timeout ~5m)..."
+          HEADSCALE_POD=""
+          for i in $(seq 1 60); do
+            CANDIDATE=$(kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | head -n 1)
+            if [ -n "$CANDIDATE" ]; then
+              if kubectl wait --for=condition=ready "pod/$CANDIDATE" -n "$NAMESPACE" --timeout=5s >/dev/null 2>&1; then
+                HEADSCALE_POD="$CANDIDATE"
+                break
+              fi
+            fi
+            echo "[INFO] Waiting for a ready pod... ($i/60)"
+            sleep 5
+          done
+          if [ -z "${HEADSCALE_POD:-}" ]; then
+            echo "[ERROR] No ready headscale pod found within timeout."
+            kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/name="$APP_NAME" -o wide || true
+            exit 1
+          fi
+          echo "[INFO] Using pod: $HEADSCALE_POD"
+
+          echo "[INFO] Ensuring user '$CLIENT_USER' exists and obtaining ID..."
+          USERS_JSON=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c "$HEADSCALE_CONTAINER" -- headscale users list --output json 2>/dev/null || printf 'null')
+          USER_ID=$(printf "%s" "$USERS_JSON" | jq -r '(. // []) | .[] | select(.name=="'"$CLIENT_USER"'") | .id' | head -n1)
+          if [ -z "${USER_ID:-}" ]; then
+            CREATE_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c "$HEADSCALE_CONTAINER" -- headscale users create "$CLIENT_USER" --output json)
+            USER_ID=$(printf "%s" "$CREATE_OUT" | jq -r '.id')
+          fi
+          if [ -z "$USER_ID" ]; then
+            echo "[ERROR] Could not determine user ID for '$CLIENT_USER'"
+            exit 1
+          fi
+          echo "[INFO] Using USER_ID=$USER_ID for '$CLIENT_USER'"
+
+          echo "[INFO] Pruning existing preauth keys for '$CLIENT_USER' (id=$USER_ID) ..."
+          KEYS_JSON=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c "$HEADSCALE_CONTAINER" -- headscale preauthkeys list -u "$USER_ID" -o json 2>/dev/null || printf 'null')
+          KEY_COUNT=$(printf "%s" "$KEYS_JSON" | jq -r '(. // []) | length')
+          if [ "$KEY_COUNT" -gt 0 ]; then
+            printf "%s" "$KEYS_JSON" | jq -r '(. // []) | .[].key' | while read -r KEY_VAL; do
+              [ -n "$KEY_VAL" ] || continue
+              echo "[INFO] Expiring key (redacted): ${KEY_VAL%%????????????????????????????????????}..."
+              kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c "$HEADSCALE_CONTAINER" -- headscale preauthkeys expire "$KEY_VAL" -u "$USER_ID" --force >/dev/null 2>&1 || true
+            done
+          else
+            echo "[INFO] No existing preauth keys found for user; nothing to prune."
+          fi
+
+          echo "[INFO] Creating preauth key for user '$CLIENT_USER' (id=$USER_ID)..."
+          AUTH_KEY=""
+          for i in 1 2 3 4 5; do
+            {{- if gt (len .Values.client.advertiseRoutes) 0 }}
+            PAK_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c "$HEADSCALE_CONTAINER" -- headscale preauthkeys create -u "$USER_ID" --reusable --ephemeral --tags tag:in-cluster-client -o json 2>&1 || true)
+            {{- else }}
+            PAK_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c "$HEADSCALE_CONTAINER" -- headscale preauthkeys create -u "$USER_ID" --reusable --ephemeral -o json 2>&1 || true)
+            {{- end }}
+            AUTH_KEY=$(printf "%s" "$PAK_OUT" | jq -r '.key // empty' | head -n1)
+            if [ -n "${AUTH_KEY:-}" ]; then
+              break
+            fi
+            echo "[WARN] Could not obtain preauth key (attempt $i). Retrying in 3s..."
+            sleep 3
+          done
+          if [ -z "${AUTH_KEY:-}" ]; then
+            echo "[ERROR] Failed to extract preauth key after multiple attempts. Last output:" >&2
+            echo "$PAK_OUT" >&2
+            exit 1
+          fi
+          echo "[INFO] Got preauth key (redacted)"
+
+          echo "[INFO] Writing authkey to $AUTHKEY_FILE..."
+          printf "%s" "$AUTH_KEY" > "$AUTHKEY_FILE"
+          chmod 400 "$AUTHKEY_FILE"
+
+          echo "[INFO] Authkey ready for main container."         
       containers:
       - name: tailscale
         image: "{{ .Values.client.image.repository }}:{{ .Values.client.image.tag }}"
@@ -38,7 +137,7 @@ spec:
         - |
           # Use POSIX-safe options; avoid bash-only flags
           set -eu
-          AUTH_FILE="/etc/client-auth/authkey"
+          AUTH_FILE="/run/secrets/headscale"
           echo "[client] Waiting for preauth key at $AUTH_FILE ..."
           # Try up to ~10 minutes for the Secret to appear via projected volume
           for i in $(seq 1 120); do
@@ -87,7 +186,7 @@ spec:
         volumeMounts:
         - name: dev-net-tun
           mountPath: /dev/net/tun
-        - name: client-auth
-          mountPath: /etc/client-auth
+        - name: authkey
+          mountPath: /run/secrets/headscale
           readOnly: true
 {{- end }}
