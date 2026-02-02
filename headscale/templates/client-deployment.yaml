@@ -19,6 +19,7 @@ spec:
         {{- include "headscale.labels" . | nindent 8 }}
         app.kubernetes.io/component: client
     spec:
+      serviceAccountName: {{ include "headscale.fullname" . }}-client
       volumes:
       - name: dev-net-tun
         hostPath:
