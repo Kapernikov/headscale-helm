@@ -97,8 +97,7 @@ spec:
               readOnly: true
             {{- end }}
             - name: policy
-              mountPath: /etc/headscale
-              subPath: policy.json
+              mountPath: /etc/headscale/policy
               readOnly: true
       volumes:
         {{- if .Values.persistence.enabled }}
