@@ -201,10 +201,10 @@ policy:
   autoApprovers:
     routes: {}
     exit-node: []
-  ssh:
-    - action: check
-      src: ["autogroup:member"]
-      dst: ["autogroup:self"]
-      users: ["autogroup:nonroot", "root"]
+  ssh: []
+    # - action: check
+    #   src: ["autogroup:member"]
+    #   dst: ["autogroup:self"]
+    #   users: ["autogroup:nonroot", "root"]
 
 # (UI values defined above; duplicate block removed)
