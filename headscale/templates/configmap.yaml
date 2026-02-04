@@ -37,7 +37,7 @@ data:
         {{- $_ := set $cfg "policy" (dict) -}}
       {{- end -}}
       {{- $policy := index $cfg "policy" -}}
-      {{- $_ := set $policy "path" "/etc/headscale/policy.json" -}}
+      {{- $_ := set $policy "path" "/etc/headscale/policy/policy.json" -}}
     {{- end -}}
     {{- toYaml $cfg | nindent 4 }}
 {{- end }}

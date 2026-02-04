@@ -1,23 +1,17 @@
-{{- if and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) }}
+{{- $policy := .Values.policy }}
+{{- $routes := .Values.client.advertiseRoutes }}
+{{- range $i, $route := $routes }}
+{{- if not (hasKey $policy.autoApprovers.routes $route) }}
+{{- $policy := set $policy.autoApprovers.routes $route (list "tag:in-cluster-client") }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "headscale.fullname" . }}-policy
   labels:
+    headscale-policy: "true"
     {{- include "headscale.labels" . | nindent 4 }}
 data:
   policy.json: |
-    {
-      "tagOwners": {
-        "tag:in-cluster-client": ["headscale-system@"]
-      },
-      "autoApprovers": {
-        "routes": {
-          {{- $routes := .Values.client.advertiseRoutes }}
-          {{- range $i, $route := $routes }}
-          {{ $route | quote }}: ["tag:in-cluster-client"]{{ if lt $i (sub (len $routes) 1) }},{{ end }}
-          {{- end }}
-        }
-      }
-    }
-{{- end }}
+    {{- $policy | toPrettyJson | nindent 4 }}

@@ -36,6 +36,30 @@ spec:
       serviceAccountName: {{ include "headscale.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: policy-sync
+          image: kiwigrid/k8s-sidecar:latest
+          restartPolicy: Always
+          env:
+            - name: LABEL
+              value: "headscale-policy"
+            - name: FOLDER
+              value: /etc/headscale
+            - name: RESOURCE
+              value: configmap
+            - name: METHOD
+              value: WATCH
+            - name: HEALTH_PORT
+              value: "8081"
+          volumeMounts:
+            - name: policy
+              mountPath: /etc/headscale
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 20
+            periodSeconds: 5
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
@@ -80,12 +104,9 @@ spec:
               subPath: {{ default "extra-dns-records.json" .Values.extraDnsRecords.configMap.key }}
               readOnly: true
             {{- end }}
-            {{- if and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) }}
             - name: policy
-              mountPath: /etc/headscale/policy.json
-              subPath: policy.json
+              mountPath: /etc/headscale/policy
               readOnly: true
-            {{- end }}
       volumes:
         {{- if .Values.persistence.enabled }}
         - name: data
@@ -111,11 +132,8 @@ spec:
           configMap:
             name: {{ $cmName }}
         {{- end }}
-        {{- if and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) }}
         - name: policy
-          configMap:
-            name: {{ include "headscale.fullname" . }}-policy
-        {{- end }}
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
