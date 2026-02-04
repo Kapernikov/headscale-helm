@@ -49,9 +49,17 @@ spec:
               value: configmap
             - name: METHOD
               value: WATCH
+            - name: HEALTH_PORT
+              value: "8081"
           volumeMounts:
             - name: policy
               mountPath: /etc/headscale
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 20
+            periodSeconds: 5
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
