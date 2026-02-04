@@ -5,14 +5,13 @@
 {{- $policy := set $policy.autoApprovers.routes $route (list "tag:in-cluster-client") }}
 {{- end }}
 {{- end }}
-{{- if .Values.client.enabled  }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "headscale.fullname" . }}-policy
   labels:
+    headscale-policy: "true"
     {{- include "headscale.labels" . | nindent 4 }}
 data:
   policy.json: |
     {{- $policy | toPrettyJson | nindent 4 }}
-{{- end }}
