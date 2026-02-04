@@ -98,6 +98,7 @@ spec:
             {{- end }}
             - name: policy
               mountPath: /etc/headscale
+              subPath: policy.json
               readOnly: true
       volumes:
         {{- if .Values.persistence.enabled }}
