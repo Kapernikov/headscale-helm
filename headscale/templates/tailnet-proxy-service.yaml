@@ -1,0 +1,24 @@
+{{- if and .Values.tailnetServices.enabled (gt (len .Values.tailnetServices.services) 0) }}
+{{- range $svc := .Values.tailnetServices.services }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "headscale.fullname" $ }}-ts-{{ $svc.name }}
+  labels:
+    {{- include "headscale.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: tailnet-proxy
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "headscale.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: tailnet-proxy
+  ports:
+  {{- range $port := $svc.ports }}
+    - name: {{ $port.name }}
+      port: {{ $port.port }}
+      targetPort: {{ $port.port }}
+      protocol: {{ $port.protocol | default "TCP" }}
+  {{- end }}
+{{- end }}
+{{- end }}

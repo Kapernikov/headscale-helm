@@ -1,0 +1,89 @@
+{{- if and .Values.tailnetServices.enabled (gt (len .Values.tailnetServices.services) 0) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "headscale.fullname" . }}-tailnet-proxy
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tailnet-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "headscale.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: tailnet-proxy
+  template:
+    metadata:
+      labels:
+        {{- include "headscale.labels" . | nindent 8 }}
+        app.kubernetes.io/component: tailnet-proxy
+      annotations:
+        checksum/envoy-config: {{ include (print $.Template.BasePath "/tailnet-proxy-configmap.yaml") . | sha256sum }}
+    spec:
+      volumes:
+      - name: dev-net-tun
+        hostPath:
+          path: /dev/net/tun
+          type: CharDevice
+      - name: proxy-auth
+        secret:
+          secretName: {{ include "headscale.fullname" . }}-proxy-authkey
+          optional: true
+      - name: envoy-config
+        configMap:
+          name: {{ include "headscale.fullname" . }}-tailnet-proxy
+      containers:
+      - name: tailscale
+        image: "{{ .Values.client.image.repository }}:{{ .Values.client.image.tag }}"
+        imagePullPolicy: {{ .Values.client.image.pullPolicy }}
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -eu
+          AUTH_FILE="/etc/proxy-auth/authkey"
+          echo "[tailnet-proxy] Waiting for preauth key at $AUTH_FILE ..."
+          for i in $(seq 1 120); do
+            if [ -s "$AUTH_FILE" ]; then
+              break
+            fi
+            echo "[tailnet-proxy] auth key not present yet ($i/120)"
+            sleep 5
+          done
+
+          echo "[tailnet-proxy] Starting tailscaled"
+          tailscaled &
+
+          if [ -s "$AUTH_FILE" ]; then
+            AUTH_KEY=$(cat "$AUTH_FILE")
+            echo "[tailnet-proxy] Performing tailscale up"
+            tailscale up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-tailnet-proxy --login-server=http://{{ include "headscale.fullname" . }}:8080 \
+              || true
+          else
+            echo "[tailnet-proxy] No preauth key found after timeout; skipping tailscale up for now."
+          fi
+
+          wait $! || true
+          tail -f /dev/null
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+        volumeMounts:
+        - name: dev-net-tun
+          mountPath: /dev/net/tun
+        - name: proxy-auth
+          mountPath: /etc/proxy-auth
+          readOnly: true
+      - name: envoy
+        image: "{{ .Values.tailnetServices.image.repository }}:{{ .Values.tailnetServices.image.tag }}"
+        imagePullPolicy: {{ .Values.tailnetServices.image.pullPolicy }}
+        command:
+        - envoy
+        - -c
+        - /etc/envoy/envoy.yaml
+        volumeMounts:
+        - name: envoy-config
+          mountPath: /etc/envoy
+          readOnly: true
+{{- end }}

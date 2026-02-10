@@ -1,0 +1,22 @@
+{{- if and .Values.tailnetServices.enabled (gt (len .Values.tailnetServices.services) 0) (.Values.tailnetServices.podDisruptionBudget.enabled | default false) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "headscale.fullname" . }}-tailnet-proxy
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tailnet-proxy
+spec:
+  selector:
+    matchLabels:
+      {{- include "headscale.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: tailnet-proxy
+  {{- $pdb := .Values.tailnetServices.podDisruptionBudget }}
+  {{- if hasKey $pdb "minAvailable" }}
+  minAvailable: {{ $pdb.minAvailable }}
+  {{- else if hasKey $pdb "maxUnavailable" }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  maxUnavailable: 1
+  {{- end }}
+{{- end }}

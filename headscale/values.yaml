@@ -196,4 +196,28 @@ client:
       tag: "1.30.2"
       pullPolicy: IfNotPresent
 
-# (UI values defined above; duplicate block removed)
+# Tailnet Services: expose services living on the tailnet as Kubernetes ClusterIP Services.
+# Deploys a single pod running tailscale (for tailnet connectivity) + Envoy (for TCP proxying),
+# with one Kubernetes Service per exposed tailnet service, plus a CoreDNS-compatible ConfigMap
+# for DNS resolution.
+tailnetServices:
+  enabled: false
+  image:
+    repository: envoyproxy/envoy
+    tag: "v1.32-latest"
+    pullPolicy: IfNotPresent
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+  services: []
+    # - name: my-nas                          # unique identifier, used in K8s resource names
+    #   hostname: "mynas.home.local"           # DNS name for CoreDNS rewrite rules (Host/SNI matching)
+    #   targetHost: "100.64.0.5"              # tailnet IP or MagicDNS name
+    #   ports:
+    #     - name: smb                          # port name (used in K8s Service port name)
+    #       port: 445                          # K8s service port & envoy listener port
+    #       targetPort: 445                    # upstream port on tailnet host (defaults to port)
+    #       protocol: TCP                      # TCP (default)
+    #     - name: https
+    #       port: 443
+    #       protocol: TCP

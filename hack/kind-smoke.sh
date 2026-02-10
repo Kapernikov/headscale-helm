@@ -16,6 +16,7 @@ ROOT_DIR=$(
 CLUSTER_NAME="headscale-kind"
 KEEP_CLUSTER=0
 WITH_CLIENT=0
+WITH_TAILNET_SERVICES=0
 
 usage() {
   cat <<EOF
@@ -25,12 +26,14 @@ Options:
   --cluster-name NAME   Override kind cluster name (default: ${CLUSTER_NAME})
   --keep                Do not delete the cluster after the test finishes
   --with-client         Enable the optional Tailscale client with advertiseRoutes
+  --with-tailnet-services  Enable tailnet services proxy with a smoke-test service
   -h, --help            Show this help message
 
 Environment variables:
   KIND_CLUSTER_NAME     Alternative way to set --cluster-name
   KEEP_CLUSTER          When set to 1, behaves like --keep
   WITH_CLIENT           When set to 1, behaves like --with-client
+  WITH_TAILNET_SERVICES When set to 1, behaves like --with-tailnet-services
 EOF
 }
 
@@ -47,6 +50,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --with-client)
       WITH_CLIENT=1
+      shift
+      ;;
+    --with-tailnet-services)
+      WITH_TAILNET_SERVICES=1
       shift
       ;;
     -h|--help)
@@ -67,6 +74,9 @@ if [[ ${KEEP_CLUSTER:-0} -eq 1 ]]; then
 fi
 if [[ ${WITH_CLIENT:-0} -eq 1 ]]; then
   WITH_CLIENT=1
+fi
+if [[ ${WITH_TAILNET_SERVICES:-0} -eq 1 ]]; then
+  WITH_TAILNET_SERVICES=1
 fi
 
 for bin in kind kubectl helm; do
@@ -122,6 +132,28 @@ else
   cat <<'EOF' >>"$TMP_VALUES"
 client:
   enabled: false
+EOF
+fi
+
+if [[ $WITH_TAILNET_SERVICES -eq 1 ]]; then
+  cat <<'EOF' >>"$TMP_VALUES"
+tailnetServices:
+  enabled: true
+  services:
+    - name: smoke-test-svc
+      hostname: "smoke.tailnet.test"
+      targetHost: "100.64.0.99"
+      ports:
+        - name: http
+          port: 8080
+        - name: https
+          port: 8443
+    - name: smoke-test-svc2
+      hostname: "smoke2.tailnet.test"
+      targetHost: "100.64.0.100"
+      ports:
+        - name: https
+          port: 8443
 EOF
 fi
 
@@ -195,6 +227,82 @@ if [[ $WITH_CLIENT -eq 1 ]]; then
   echo "[verify] Ensuring policy.path is set in headscale config"
   if ! grep -q 'path: /etc/headscale/policy.json' <<<"$CONFIG_YAML"; then
     echo "[ERROR] policy.path not found in config.yaml" >&2
+    exit 1
+  fi
+fi
+
+if [[ $WITH_TAILNET_SERVICES -eq 1 ]]; then
+  echo "[kubectl] Waiting for proxy auth key secret to appear"
+  for _ in $(seq 1 40); do
+    if kubectl get secret headscale-proxy-authkey -n headscale >/dev/null 2>&1; then
+      break
+    fi
+    sleep 3
+  done
+  if ! kubectl get secret headscale-proxy-authkey -n headscale >/dev/null 2>&1; then
+    echo "[WARN] headscale-proxy-authkey secret not found; tailnet proxy login may fail"
+  fi
+
+  echo "[kubectl] Checking tailnet-proxy deployment readiness"
+  kubectl rollout status deployment/headscale-tailnet-proxy -n headscale --timeout=3m
+
+  echo "[verify] Ensuring Envoy ConfigMap contains SNI listener for shared port"
+  ENVOY_CONFIG=$(kubectl get configmap headscale-tailnet-proxy -n headscale -o jsonpath='{.data.envoy\.yaml}')
+  if ! grep -q 'tls-passthrough-8443' <<<"$ENVOY_CONFIG"; then
+    echo "[ERROR] Expected SNI listener tls-passthrough-8443 not found in Envoy ConfigMap" >&2
+    exit 1
+  fi
+  if ! grep -q 'smoke-test-svc-http' <<<"$ENVOY_CONFIG"; then
+    echo "[ERROR] Expected simple listener smoke-test-svc-http not found in Envoy ConfigMap" >&2
+    exit 1
+  fi
+
+  echo "[verify] Ensuring Envoy ConfigMap contains server_names for both hostnames"
+  if ! grep -q 'smoke.tailnet.test' <<<"$ENVOY_CONFIG"; then
+    echo "[ERROR] Expected server_names entry for smoke.tailnet.test not found in Envoy ConfigMap" >&2
+    exit 1
+  fi
+  if ! grep -q 'smoke2.tailnet.test' <<<"$ENVOY_CONFIG"; then
+    echo "[ERROR] Expected server_names entry for smoke2.tailnet.test not found in Envoy ConfigMap" >&2
+    exit 1
+  fi
+
+  echo "[verify] Ensuring K8s Service for smoke-test-svc exists with both ports"
+  SVC_JSON=$(kubectl get service headscale-ts-smoke-test-svc -n headscale -o json)
+  if ! echo "$SVC_JSON" | grep -q '"http"'; then
+    echo "[ERROR] Expected port 'http' not found in service headscale-ts-smoke-test-svc" >&2
+    exit 1
+  fi
+  if ! echo "$SVC_JSON" | grep -q '"https"'; then
+    echo "[ERROR] Expected port 'https' not found in service headscale-ts-smoke-test-svc" >&2
+    exit 1
+  fi
+
+  echo "[verify] Ensuring K8s Service for smoke-test-svc2 exists"
+  if ! kubectl get service headscale-ts-smoke-test-svc2 -n headscale >/dev/null 2>&1; then
+    echo "[ERROR] Expected service headscale-ts-smoke-test-svc2 not found" >&2
+    exit 1
+  fi
+
+  echo "[verify] Ensuring DNS ConfigMap contains rewrite rules for both services"
+  DNS_SNIPPET=$(kubectl get configmap headscale-tailnet-dns -n headscale -o jsonpath='{.data.tailnet-services\.snippet}')
+  if ! grep -q 'smoke.tailnet.test' <<<"$DNS_SNIPPET"; then
+    echo "[ERROR] Expected rewrite rule for smoke.tailnet.test not found in DNS ConfigMap" >&2
+    exit 1
+  fi
+  if ! grep -q 'smoke2.tailnet.test' <<<"$DNS_SNIPPET"; then
+    echo "[ERROR] Expected rewrite rule for smoke2.tailnet.test not found in DNS ConfigMap" >&2
+    exit 1
+  fi
+
+  echo "[verify] Ensuring proxy pod has both containers (tailscale + envoy)"
+  PROXY_CONTAINERS=$(kubectl get pods -n headscale -l app.kubernetes.io/component=tailnet-proxy -o jsonpath='{.items[0].spec.containers[*].name}')
+  if ! echo "$PROXY_CONTAINERS" | grep -q 'tailscale'; then
+    echo "[ERROR] Tailscale container not found in tailnet-proxy pod" >&2
+    exit 1
+  fi
+  if ! echo "$PROXY_CONTAINERS" | grep -q 'envoy'; then
+    echo "[ERROR] Envoy container not found in tailnet-proxy pod" >&2
     exit 1
   fi
 fi
