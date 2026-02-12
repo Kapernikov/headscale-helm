@@ -185,6 +185,12 @@ client:
   # Example:
   #   - "10.20.0.0/16"    # specific external subnet
   advertiseRoutes: []
+  # Expiration for the client preauthkey. Headscale defaults to 1h when
+  # omitted, which causes the in-cluster client to lose connectivity once
+  # the key expires.  Set to a long duration (default 87600h ≈ 10 years)
+  # to keep the client connected across restarts.  The key is regenerated
+  # on every helm upgrade anyway, so this is effectively non-expiring.
+  preauthKeyExpiration: "87600h"
   # Pod disruption budget settings for the optional client deployment.
   podDisruptionBudget:
     enabled: true
