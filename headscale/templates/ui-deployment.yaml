@@ -14,6 +14,10 @@ spec:
       app.kubernetes.io/component: ui
   template:
     metadata:
+      {{- if .Values.ui.configMap.enabled }}
+      annotations:
+        checksum/ui-config: {{ include (print $.Template.BasePath "/ui-configmap.yaml") . | sha256sum }}
+      {{- end }}
       labels:
         {{- include "headscale.labels" . | nindent 8 }}
         app.kubernetes.io/component: ui
@@ -57,4 +61,24 @@ spec:
           {{- end }}
           {{- end }}
           {{- end }}
+          {{- if .Values.ui.configMap.enabled }}
+          volumeMounts:
+            - name: ui-config
+              mountPath: {{ .Values.ui.configMap.path }}
+              subPath: {{ .Values.ui.configMap.key }}
+              readOnly: true
+          {{- end }}
+      {{- if .Values.ui.configMap.enabled }}
+      volumes:
+        {{- $uiCm := .Values.ui.configMap -}}
+        {{- $cmName := "" -}}
+        {{- if $uiCm.create -}}
+          {{- $cmName = default (printf "%s-ui-config" (include "headscale.fullname" .)) $uiCm.name -}}
+        {{- else -}}
+          {{- $cmName = required "ui.configMap.name must be set when ui.configMap.create is false" $uiCm.name -}}
+        {{- end }}
+        - name: ui-config
+          configMap:
+            name: {{ $cmName }}
+      {{- end }}
 {{- end }}

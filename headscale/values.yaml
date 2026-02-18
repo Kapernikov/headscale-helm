@@ -96,6 +96,14 @@ ui:
     pathType: ImplementationSpecific
     annotations: {}
     tls: []
+  # Optional ConfigMap for UI configuration file
+  configMap:
+    enabled: false # Set to true to mount a ConfigMap into the UI container.
+    create: true # When true, the chart creates a ConfigMap using the data below.
+    name: "" # Optional override for the ConfigMap name; required when create=false to reference an existing ConfigMap.
+    key: config.yaml # Key inside the ConfigMap data that stores the configuration.
+    path: /app/config.yaml # Path inside the container where the config file will be mounted.
+    data: {} # YAML data for the configuration file when create=true.
 
 resources: {}
   # We usually recommend not to specify default resources and to leave this as a conscious
