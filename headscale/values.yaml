@@ -85,6 +85,8 @@ ui:
     port: 8080
   # If empty, defaults to the internal Headscale service URL
   headscaleUrl: ""
+  # Environment variable name for the Headscale URL for compatibility with different UI implementations (e.g. HEADSCALE_URL for headscale-ui, HEADPLANE_HEADSCALE__URL for headplane)
+  headscaleUrlEnvName: "HEADSCALE_URL"
   # Additional environment variables as a list of {name, value}
   extraEnv: []
   # UI ingress is created only when ui.enabled and ingress.enabled are both true

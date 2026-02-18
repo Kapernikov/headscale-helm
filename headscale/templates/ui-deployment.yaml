@@ -31,7 +31,7 @@ spec:
               containerPort: {{ .Values.ui.containerPort }}
               protocol: TCP
           env:
-            - name: HEADSCALE_URL
+            - name: {{ .Values.ui.headscaleUrlEnvName }}
               {{- /*
                    Default precedence for HEADSCALE_URL:
                    1) .Values.ui.headscaleUrl if provided
