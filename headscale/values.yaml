@@ -74,6 +74,7 @@ ui:
     repository: ghcr.io/gurucomputing/headscale-ui
     tag: "latest"
     pullPolicy: IfNotPresent
+  containerPort: 8080
   # Pod disruption budget settings for the optional UI deployment.
   podDisruptionBudget:
     enabled: true
@@ -81,7 +82,7 @@ ui:
   # Service for the UI
   service:
     type: ClusterIP
-    port: 80
+    port: 8080
   # If empty, defaults to the internal Headscale service URL
   headscaleUrl: ""
   # Additional environment variables as a list of {name, value}

@@ -28,7 +28,7 @@ spec:
           imagePullPolicy: {{ .Values.ui.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: {{ .Values.ui.containerPort }}
               protocol: TCP
           env:
             - name: HEADSCALE_URL
