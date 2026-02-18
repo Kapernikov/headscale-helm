@@ -48,7 +48,7 @@ service:
 ingress:
   enabled: false
   className: "nginx"
-  annotations:
+  annotations: {}
     # Websocket support and long-lived connections for ingress-nginx
     # nginx.ingress.kubernetes.io/client-body-buffer-size: 1m
     # nginx.ingress.kubernetes.io/proxy-body-size: 8000m
