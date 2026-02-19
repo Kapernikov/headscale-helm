@@ -160,6 +160,16 @@ config:
     urls:
       - https://controlplane.tailscale.com/derpmap/default
 
+# Static DERP map file
+derpMap:
+  enabled: false  # Set to true to mount a custom DERP map and add it to derp.paths.
+  path: /etc/headscale/derp-map.yaml  # Path inside the container for the rendered DERP map file.
+  configMap:
+    create: true  # When true, the chart creates a ConfigMap using the regions map below.
+    name: ""  # Optional override for the ConfigMap name; required when create=false to reference an existing ConfigMap.
+    key: derp-map.yaml  # Key inside the ConfigMap data that stores the DERP map payload.
+  regions: {}  # DERP map content (regions, OmitDefaultRegions, etc.) rendered as YAML.
+
 # Extra DNS records (MagicDNS)
 extraDnsRecords:
   enabled: false  # Set to true to configure dns.extra_records_path and mount the JSON file.

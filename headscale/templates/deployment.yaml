@@ -16,6 +16,9 @@ spec:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.derpMap.enabled }}
+        checksum/derp-map: {{ include (print $.Template.BasePath "/derp-map-configmap.yaml") . | sha256sum }}
+        {{- end }}
         {{- if .Values.extraDnsRecords.enabled }}
         checksum/extra-dns: {{ include (print $.Template.BasePath "/extra-dns-configmap.yaml") . | sha256sum }}
         {{- end }}
@@ -73,6 +76,12 @@ spec:
             - name: config
               mountPath: /etc/headscale/config.yaml
               subPath: config.yaml
+            {{- if .Values.derpMap.enabled }}
+            - name: derp-map
+              mountPath: {{ .Values.derpMap.path }}
+              subPath: {{ .Values.derpMap.configMap.key }}
+              readOnly: true
+            {{- end }}
             {{ if .Values.extraDnsRecords.enabled }}
             {{- $extra := .Values.extraDnsRecords -}}
             {{- $dnsConfig := (index .Values.config "dns") | default (dict) -}}
@@ -104,6 +113,18 @@ spec:
         - name: config
           configMap:
             name: {{ include "headscale.fullname" . }}
+        {{- if .Values.derpMap.enabled }}
+        {{- $dm := .Values.derpMap -}}
+        {{- $cmName := "" -}}
+        {{- if $dm.configMap.create -}}
+          {{- $cmName = default (printf "%s-derp-map" (include "headscale.fullname" .)) $dm.configMap.name -}}
+        {{- else -}}
+          {{- $cmName = required "derpMap.configMap.name must be set when derpMap.configMap.create is false" $dm.configMap.name -}}
+        {{- end }}
+        - name: derp-map
+          configMap:
+            name: {{ $cmName }}
+        {{- end }}
         {{ if .Values.extraDnsRecords.enabled }}
         {{- $extra := .Values.extraDnsRecords -}}
         {{- $cmName := "" -}}

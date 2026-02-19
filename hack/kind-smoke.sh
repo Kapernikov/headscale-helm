@@ -2,8 +2,8 @@
 
 # Simple local smoke test for the headscale Helm chart using kind.
 # The script creates a temporary kind cluster (unless one already exists),
-# installs the chart with extra DNS records enabled, and verifies that
-# headscale renders dns.extra_records_path correctly. The cluster is deleted
+# installs the chart with extra DNS records and a static DERP map enabled,
+# and verifies that headscale renders them correctly. The cluster is deleted
 # on success unless --keep is supplied or the cluster pre-existed.
 
 set -euo pipefail
@@ -109,6 +109,19 @@ extraDnsRecords:
     - name: smoke.internal.test
       type: A
       value: 100.64.0.42
+derpMap:
+  enabled: true
+  regions:
+    OmitDefaultRegions: true
+    Regions:
+      900:
+        RegionID: 900
+        RegionCode: smoke
+        RegionName: Smoke DERP
+        Nodes:
+          - Name: smoke-derp
+            RegionID: 900
+            HostName: derp.smoke.test
 EOF
 
 if [[ $WITH_CLIENT -eq 1 ]]; then
@@ -167,6 +180,23 @@ echo "[verify] Ensuring extra DNS ConfigMap contains our record"
 EXTRA_JSON=$(kubectl get configmap headscale-extra-dns -n headscale -o jsonpath='{.data.extra-dns-records\.json}')
 if ! grep -q 'smoke.internal.test' <<<"$EXTRA_JSON"; then
   echo "[ERROR] Expected DNS record not found in headscale-extra-dns ConfigMap" >&2
+  exit 1
+fi
+
+echo "[verify] Ensuring derp.paths is present in rendered config"
+if ! grep -q 'paths:' <<<"$CONFIG_YAML"; then
+  echo "[ERROR] derp.paths entry missing in config.yaml" >&2
+  exit 1
+fi
+if ! grep -q '/etc/headscale/derp-map.yaml' <<<"$CONFIG_YAML"; then
+  echo "[ERROR] DERP map path missing from config.yaml" >&2
+  exit 1
+fi
+
+echo "[verify] Ensuring DERP map ConfigMap contains our region"
+DERP_YAML=$(kubectl get configmap headscale-derp-map -n headscale -o jsonpath='{.data.derp-map\.yaml}')
+if ! grep -q 'derp.smoke.test' <<<"$DERP_YAML"; then
+  echo "[ERROR] Expected DERP node not found in headscale-derp-map ConfigMap" >&2
   exit 1
 fi
 
