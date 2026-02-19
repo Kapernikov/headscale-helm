@@ -170,6 +170,19 @@ extraDnsRecords:
     key: extra-dns-records.json  # Key inside the ConfigMap data that stores the JSON payload.
   records: []  # List of {name, type, value} maps that will be rendered as JSON when create=true.
 
+# ACL policy configuration
+policy:
+  enabled: false
+  path: /etc/headscale/policy.json
+  configMap:
+    create: true    # true = chart creates CM from content below; false = reference existing CM
+    name: ""        # name override (required when create=false)
+    key: policy.json
+  # Inline policy content (used when configMap.create=true).
+  # Merged with auto-generated in-cluster client entries when client.advertiseRoutes is set.
+  # See https://headscale.net/ref/acls/ for the policy format.
+  content: {}
+
 # Client configuration
 client:
   enabled: true

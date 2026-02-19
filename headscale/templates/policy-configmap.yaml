@@ -1,4 +1,6 @@
-{{- if and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) }}
+{{- $clientRoutes := and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) -}}
+{{- $policyCreate := and .Values.policy.enabled .Values.policy.configMap.create -}}
+{{- if or $policyCreate (and $clientRoutes (not .Values.policy.enabled)) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,7 +8,25 @@ metadata:
   labels:
     {{- include "headscale.labels" . | nindent 4 }}
 data:
-  policy.json: |
+  {{ .Values.policy.configMap.key | default "policy.json" }}: |
+    {{- if $policyCreate }}
+    {{- /* Start with user-provided content */}}
+    {{- $policy := deepCopy (.Values.policy.content | default dict) }}
+    {{- /* Merge auto-generated client entries when client advertises routes */}}
+    {{- if $clientRoutes }}
+      {{- $tagOwners := $policy.tagOwners | default dict }}
+      {{- $_ := set $tagOwners "tag:in-cluster-client" (list "headscale-system@") }}
+      {{- $_ := set $policy "tagOwners" $tagOwners }}
+      {{- $autoApprovers := $policy.autoApprovers | default dict }}
+      {{- $routes := $autoApprovers.routes | default dict }}
+      {{- range .Values.client.advertiseRoutes }}
+      {{- $_ := set $routes . (list "tag:in-cluster-client") }}
+      {{- end }}
+      {{- $_ := set $autoApprovers "routes" $routes }}
+      {{- $_ := set $policy "autoApprovers" $autoApprovers }}
+    {{- end }}
+    {{- $policy | toPrettyJson | nindent 4 }}
+    {{- else }}
     {
       "tagOwners": {
         "tag:in-cluster-client": ["headscale-system@"]
@@ -20,4 +40,5 @@ data:
         }
       }
     }
+    {{- end }}
 {{- end }}

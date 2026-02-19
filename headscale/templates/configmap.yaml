@@ -31,13 +31,15 @@ data:
         {{- $_ := set $dns "extra_records_path" $path -}}
       {{- end -}}
     {{- end -}}
-    {{- /* Add policy path when client advertises routes */ -}}
-    {{- if and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) -}}
+    {{- /* Add policy path when policy is enabled or client advertises routes */ -}}
+    {{- $needsPolicy := or .Values.policy.enabled (and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0)) -}}
+    {{- if $needsPolicy -}}
       {{- if not (hasKey $cfg "policy") -}}
         {{- $_ := set $cfg "policy" (dict) -}}
       {{- end -}}
       {{- $policy := index $cfg "policy" -}}
-      {{- $_ := set $policy "path" "/etc/headscale/policy.json" -}}
+      {{- $policyPath := ternary .Values.policy.path "/etc/headscale/policy.json" .Values.policy.enabled -}}
+      {{- $_ := set $policy "path" $policyPath -}}
     {{- end -}}
     {{- toYaml $cfg | nindent 4 }}
 {{- end }}
