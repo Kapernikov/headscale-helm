@@ -23,7 +23,7 @@ podLabels: {}
 # Pod disruption budget settings for the main Headscale server pods.
 podDisruptionBudget:
   enabled: true
-  maxUnavailable: 1  # Allow voluntary disruptions to evict the single replica.
+  maxUnavailable: 1 # Allow voluntary disruptions to evict the single replica.
 
 podSecurityContext:
   fsGroup: 1000
@@ -143,7 +143,6 @@ readinessProbe:
   timeoutSeconds: 3
   failureThreshold: 3
 
-
 # Persistence configuration
 persistence:
   enabled: true
@@ -182,31 +181,31 @@ config:
 
 # Static DERP map file
 derpMap:
-  enabled: false  # Set to true to mount a custom DERP map and add it to derp.paths.
-  path: /etc/headscale/derp-map.yaml  # Path inside the container for the rendered DERP map file.
+  enabled: false # Set to true to mount a custom DERP map and add it to derp.paths.
+  path: /etc/headscale/derp-map.yaml # Path inside the container for the rendered DERP map file.
   configMap:
-    create: true  # When true, the chart creates a ConfigMap using the regions map below.
-    name: ""  # Optional override for the ConfigMap name; required when create=false to reference an existing ConfigMap.
-    key: derp-map.yaml  # Key inside the ConfigMap data that stores the DERP map payload.
-  content: {}  # DERP map content (regions, OmitDefaultRegions, etc.) rendered as YAML.
+    create: true # When true, the chart creates a ConfigMap using the regions map below.
+    name: "" # Optional override for the ConfigMap name; required when create=false to reference an existing ConfigMap.
+    key: derp-map.yaml # Key inside the ConfigMap data that stores the DERP map payload.
+  content: {} # DERP map content (regions, OmitDefaultRegions, etc.) rendered as YAML.
 
 # Extra DNS records (MagicDNS)
 extraDnsRecords:
-  enabled: false  # Set to true to configure dns.extra_records_path and mount the JSON file.
-  path: /etc/headscale/extra-dns-records.json  # Path inside the container for the rendered JSON file.
+  enabled: false # Set to true to configure dns.extra_records_path and mount the JSON file.
+  path: /etc/headscale/extra-dns-records.json # Path inside the container for the rendered JSON file.
   configMap:
-    create: true  # When true, the chart creates a ConfigMap using the records list below.
-    name: ""  # Optional override for the ConfigMap name; required when create=false to reference an existing ConfigMap.
-    key: extra-dns-records.json  # Key inside the ConfigMap data that stores the JSON payload.
-  records: []  # List of {name, type, value} maps that will be rendered as JSON when create=true.
+    create: true # When true, the chart creates a ConfigMap using the records list below.
+    name: "" # Optional override for the ConfigMap name; required when create=false to reference an existing ConfigMap.
+    key: extra-dns-records.json # Key inside the ConfigMap data that stores the JSON payload.
+  records: [] # List of {name, type, value} maps that will be rendered as JSON when create=true.
 
 # ACL policy configuration
 policy:
   enabled: false
   path: /etc/headscale/policy.json
   configMap:
-    create: true    # true = chart creates CM from content below; false = reference existing CM
-    name: ""        # name override (required when create=false)
+    create: true # true = chart creates CM from content below; false = reference existing CM
+    name: "" # name override (required when create=false)
     key: policy.json
   # Inline policy content (used when configMap.create=true).
   # Merged with auto-generated in-cluster client entries when client.advertiseRoutes is set.
@@ -217,9 +216,9 @@ policy:
 client:
   enabled: true
   image:
-      repository: tailscale/tailscale
-      pullPolicy: IfNotPresent
-      tag: "stable"
+    repository: tailscale/tailscale
+    pullPolicy: IfNotPresent
+    tag: "stable"
   # Routes to advertise to the Tailscale network.
   # When configured, IP forwarding is enabled and the client acts as a subnet router.
   # WARNING: Using "0.0.0.0/0" or "::/0" (exit node mode) will also expose all
@@ -253,7 +252,7 @@ client:
     # Useful for keeping the client connected indefinitely without helm upgrades.
     cronjob:
       enabled: false
-      schedule: "0 3 1 * *"  # First of each month at 03:00 by default
+      schedule: "0 3 1 * *" # First of each month at 03:00 by default
 
 # Extra volumes to add to the Headscale server deployment.
 # Useful for mounting secrets (e.g. OIDC client credentials) or other files.
@@ -272,5 +271,4 @@ extraVolumes: []
 #     mountPath: /etc/headscale/oidc
 #     readOnly: true
 extraVolumeMounts: []
-
 # (UI values defined above; duplicate block removed)
