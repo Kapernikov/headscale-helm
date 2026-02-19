@@ -61,24 +61,37 @@ spec:
           {{- end }}
           {{- end }}
           {{- end }}
-          {{- if .Values.ui.configMap.enabled }}
+          {{- if or .Values.ui.configMap.enabled .Values.ui.persistence.enabled }}
           volumeMounts:
+            {{- if .Values.ui.configMap.enabled }}
             - name: ui-config
               mountPath: {{ .Values.ui.configMap.path }}
               subPath: {{ .Values.ui.configMap.key }}
               readOnly: true
+            {{- end }}
+            {{- if .Values.ui.persistence.enabled }}
+            - name: ui-data
+              mountPath: {{ .Values.ui.persistence.mountPath }}
+            {{- end }}
           {{- end }}
-      {{- if .Values.ui.configMap.enabled }}
+      {{- if or .Values.ui.configMap.enabled .Values.ui.persistence.enabled }}
       volumes:
-        {{- $uiCm := .Values.ui.configMap -}}
-        {{- $cmName := "" -}}
-        {{- if $uiCm.create -}}
-          {{- $cmName = default (printf "%s-ui-config" (include "headscale.fullname" .)) $uiCm.name -}}
-        {{- else -}}
-          {{- $cmName = required "ui.configMap.name must be set when ui.configMap.create is false" $uiCm.name -}}
-        {{- end }}
+        {{- if .Values.ui.configMap.enabled }}
+          {{- $uiCm := .Values.ui.configMap -}}
+          {{- $cmName := "" -}}
+          {{- if $uiCm.create -}}
+            {{- $cmName = default (printf "%s-ui-config" (include "headscale.fullname" .)) $uiCm.name -}}
+          {{- else -}}
+            {{- $cmName = required "ui.configMap.name must be set when ui.configMap.create is false" $uiCm.name -}}
+          {{- end }}
         - name: ui-config
           configMap:
             name: {{ $cmName }}
+        {{- end }}
+        {{- if .Values.ui.persistence.enabled }}
+        - name: ui-data
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-ui" (include "headscale.fullname" .)) .Values.ui.persistence.existingClaim }}
+        {{- end }}
       {{- end }}
 {{- end }}

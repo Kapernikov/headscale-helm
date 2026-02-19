@@ -1,0 +1,20 @@
+{{- if and .Values.ui.enabled .Values.ui.persistence.enabled (not .Values.ui.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "headscale.fullname" . }}-ui
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ui
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml .Values.ui.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.ui.persistence.size }}
+  {{- if .Values.ui.persistence.storageClassName }}
+  storageClassName: {{ .Values.ui.persistence.storageClassName }}
+  {{- end }}
+{{- end }}

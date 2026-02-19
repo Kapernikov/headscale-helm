@@ -81,6 +81,7 @@ This chart can optionally deploy the community Headscale UI (`gurucomputing/head
 - A separate `Service` named `<release>-headscale-ui` is created on port `ui.service.port` (default 80).
 - When `ingress.enabled=true`, the UI is exposed on the same hostname as Headscale under a subpath (default `/web`). The UI has its own `Ingress` resource that targets the same host as the main ingress, with its path set from `ui.ingress.path`.
 - `HEADSCALE_URL` defaults to the external scheme+host from the main Ingress when Ingress is enabled; otherwise it falls back to the internal cluster service. You can override via `ui.headscaleUrl`.
+- Optional UI persistence creates a PVC and mounts it at `ui.persistence.mountPath`. Set `ui.persistence.existingClaim` to reuse a pre-created PVC.
 
 Example snippet:
 
@@ -100,6 +101,10 @@ ui:
   ingress:
   path: /web
   pathType: ImplementationSpecific
+  persistence:
+    enabled: true
+    mountPath: /var/lib/headscale-ui
+    size: 5Gi
 ```
 
 ## Local Testing with kind

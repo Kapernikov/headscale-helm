@@ -104,6 +104,15 @@ ui:
     key: config.yaml # Key inside the ConfigMap data that stores the configuration.
     path: /app/config.yaml # Path inside the container where the config file will be mounted.
     data: {} # YAML data for the configuration file when create=true.
+  # Optional persistence for the UI container.
+  persistence:
+    enabled: false
+    size: 1Gi
+    accessModes:
+      - ReadWriteOnce
+    storageClassName: ""
+    existingClaim: "" # When set, uses an existing PVC instead of creating a new one.
+    mountPath: /var/lib/headscale-ui
 
 resources: {}
   # We usually recommend not to specify default resources and to leave this as a conscious
