@@ -7,5 +7,5 @@ metadata:
     {{- include "headscale.labels" . | nindent 4 }}
 data:
   {{ .Values.derpMap.configMap.key }}: |
-    {{- toYaml .Values.derpMap.regions | nindent 4 }}
+    {{- regexReplaceAll "(?m)(^\\s*)\"(\\d+)\":" (toYaml .Values.derpMap.content) "${1}${2}:" | nindent 4 }}
 {{- end }}
