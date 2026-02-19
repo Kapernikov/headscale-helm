@@ -31,6 +31,16 @@ data:
         {{- $_ := set $dns "extra_records_path" $path -}}
       {{- end -}}
     {{- end -}}
+    {{- /* Add derp.paths when a static DERP map is provided */ -}}
+    {{- if .Values.derpMap.enabled -}}
+      {{- if not (hasKey $cfg "derp") -}}
+        {{- $_ := set $cfg "derp" (dict) -}}
+      {{- end -}}
+      {{- $derp := index $cfg "derp" -}}
+      {{- if not (hasKey $derp "paths") -}}
+        {{- $_ := set $derp "paths" (list .Values.derpMap.path) -}}
+      {{- end -}}
+    {{- end -}}
     {{- /* Add policy path when client advertises routes */ -}}
     {{- if and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) -}}
       {{- if not (hasKey $cfg "policy") -}}

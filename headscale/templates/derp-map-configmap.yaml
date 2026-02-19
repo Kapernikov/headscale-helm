@@ -1,0 +1,11 @@
+{{- if and .Values.derpMap.enabled .Values.derpMap.configMap.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ default (printf "%s-derp-map" (include "headscale.fullname" .)) .Values.derpMap.configMap.name }}
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+data:
+  {{ .Values.derpMap.configMap.key }}: |
+    {{- toYaml .Values.derpMap.regions | nindent 4 }}
+{{- end }}
