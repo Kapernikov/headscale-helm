@@ -2,7 +2,7 @@
 
 A Helm chart for deploying Headscale, an open-source implementation of the Tailscale control server.
 
-![Version: 0.1.4](https://img.shields.io/badge/Version-0.1.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.27.0](https://img.shields.io/badge/AppVersion-0.27.0-informational?style=flat-square)
+![Version: 0.1.6](https://img.shields.io/badge/Version-0.1.6-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.28.0](https://img.shields.io/badge/AppVersion-0.28.0-informational?style=flat-square)
 
 ## Client Container
 
@@ -136,6 +136,7 @@ $ helm install my-release foo-bar/headscale
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| client.advertiseRoutes | list | `[]` |  |
 | client.enabled | bool | `true` |  |
 | client.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.image.repository | string | `"tailscale/tailscale"` |  |
@@ -145,6 +146,7 @@ $ helm install my-release foo-bar/headscale
 | client.job.image.tag | string | `"1.30.2"` |  |
 | client.podDisruptionBudget.enabled | bool | `true` |  |
 | client.podDisruptionBudget.maxUnavailable | int | `1` |  |
+| client.preauthKeyExpiration | string | `"87600h"` |  |
 | config.database.sqlite.path | string | `"/var/lib/headscale/db.sqlite"` |  |
 | config.database.type | string | `"sqlite"` |  |
 | config.derp.urls[0] | string | `"https://controlplane.tailscale.com/derpmap/default"` |  |
@@ -168,7 +170,7 @@ $ helm install my-release foo-bar/headscale
 | fullnameOverride | string | `""` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"headscale/headscale"` |  |
-| image.tag | string | `"v0.27.0"` |  |
+| image.tag | string | `"v0.28.0"` |  |
 | imagePullSecrets | list | `[]` |  |
 | ingress.annotations | string | `nil` |  |
 | ingress.className | string | `"nginx"` |  |
@@ -191,6 +193,12 @@ $ helm install my-release foo-bar/headscale
 | podDisruptionBudget.maxUnavailable | int | `1` |  |
 | podLabels | object | `{}` |  |
 | podSecurityContext.fsGroup | int | `1000` |  |
+| policy.configMap.create | bool | `true` |  |
+| policy.configMap.key | string | `"policy.json"` |  |
+| policy.configMap.name | string | `""` |  |
+| policy.content | object | `{}` |  |
+| policy.enabled | bool | `false` |  |
+| policy.path | string | `"/etc/headscale/policy.json"` |  |
 | readinessProbe.failureThreshold | int | `3` |  |
 | readinessProbe.httpGet.path | string | `"/health"` |  |
 | readinessProbe.httpGet.port | string | `"http"` |  |
