@@ -147,6 +147,10 @@ readinessProbe:
 persistence:
   enabled: true
   size: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ""
+  existingClaim: "" # When set, uses an existing PVC instead of creating a new one.
 
 # Headscale configuration
 configMap:

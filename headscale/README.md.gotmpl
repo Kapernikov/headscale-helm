@@ -17,7 +17,7 @@ You can enable or disable the client container via the `client.enabled` value in
 
 Headscale requires persistence to store its database and noise private key. This chart configures a PersistentVolumeClaim (PVC) to ensure that Headscale's data is not lost across pod restarts or redeployments.
 
-By default, persistence is enabled with a 1Gi volume. You can configure the size through the `persistence` section in `values.yaml`. Data is stored at `/var/lib/headscale` inside the container and this mount path is fixed by the chart.
+By default, persistence is enabled with a 1Gi volume. You can configure the size, access modes, and storage class through the `persistence` section in `values.yaml`. Set `persistence.existingClaim` to reuse a pre-created PVC. Data is stored at `/var/lib/headscale` inside the container and this mount path is fixed by the chart.
 
 ## Ingress
 
