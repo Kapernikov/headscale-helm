@@ -19,6 +19,9 @@ spec:
         {{- if .Values.extraDnsRecords.enabled }}
         checksum/extra-dns: {{ include (print $.Template.BasePath "/extra-dns-configmap.yaml") . | sha256sum }}
         {{- end }}
+        {{- if or .Values.policy.enabled (and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0)) }}
+        checksum/policy: {{ include (print $.Template.BasePath "/policy-configmap.yaml") . | sha256sum }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -80,10 +83,12 @@ spec:
               subPath: {{ default "extra-dns-records.json" .Values.extraDnsRecords.configMap.key }}
               readOnly: true
             {{- end }}
-            {{- if and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) }}
+            {{- if or .Values.policy.enabled (and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0)) }}
+            {{- $mountPath := ternary .Values.policy.path "/etc/headscale/policy.json" .Values.policy.enabled }}
+            {{- $subPath := ternary (.Values.policy.configMap.key | default "policy.json") "policy.json" .Values.policy.enabled }}
             - name: policy
-              mountPath: /etc/headscale/policy.json
-              subPath: policy.json
+              mountPath: {{ $mountPath }}
+              subPath: {{ $subPath }}
               readOnly: true
             {{- end }}
       volumes:
@@ -111,10 +116,16 @@ spec:
           configMap:
             name: {{ $cmName }}
         {{- end }}
-        {{- if and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) }}
+        {{- if or .Values.policy.enabled (and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0)) }}
+        {{- $policyCmName := "" -}}
+        {{- if and .Values.policy.enabled (not .Values.policy.configMap.create) -}}
+          {{- $policyCmName = required "policy.configMap.name must be set when policy.configMap.create is false" .Values.policy.configMap.name -}}
+        {{- else -}}
+          {{- $policyCmName = printf "%s-policy" (include "headscale.fullname" .) -}}
+        {{- end }}
         - name: policy
           configMap:
-            name: {{ include "headscale.fullname" . }}-policy
+            name: {{ $policyCmName }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
