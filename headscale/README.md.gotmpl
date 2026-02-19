@@ -10,8 +10,12 @@ This Helm chart includes an optional client container that runs a Tailscale clie
 The client container is configured to:
 - Start the `tailscaled` daemon in the background.
 - Use `tailscale up` to connect to the Headscale server.
+- Optionally advertise routes to act as a subnet router.
+- Optionally advertise itself as an exit node.
 
-You can enable or disable the client container via the `client.enabled` value in `values.yaml`.
+You can enable or disable the client container via the `client.enabled` value in `values.yaml`. Configure subnet routing with `client.advertiseRoutes` and exit node functionality with `client.exitNode`.
+
+**Warning:** Using the client as an exit node (or advertising `0.0.0.0/0` and `::/0` routes) exposes all Kubernetes pods and services to nodes using this exit node. This is usually not recommended. Only enable this if you understand the security implications.
 
 ## Persistence
 

@@ -236,6 +236,10 @@ client:
   # without needing a PVC. RBAC is created automatically. The preauth key is
   # created as reusable (not ephemeral) so the node persists across restarts.
   #
+  # Enable exit node functionality.
+  # When set to true, the client will be configured as an exit node.
+  # This requires advertiseRoutes to include at least "0.0.0.0/0" and/or "::/0".
+  exitNode: false
   # Expiration for the client preauthkey. Headscale defaults to 1h when
   # omitted, which causes the in-cluster client to lose connectivity once
   # the key expires.  Set to a long duration (default 87600h ≈ 10 years)
