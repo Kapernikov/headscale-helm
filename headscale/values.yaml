@@ -233,6 +233,6 @@ client:
     # Useful for keeping the client connected indefinitely without helm upgrades.
     cronjob:
       enabled: false
-      schedule: "0 */6 * * *"  # Every 6 hours by default
+      schedule: "0 3 1 * *"  # First of each month at 03:00 by default
 
 # (UI values defined above; duplicate block removed)
