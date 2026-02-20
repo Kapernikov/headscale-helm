@@ -208,21 +208,31 @@ client:
   # Example:
   #   - "10.20.0.0/16"    # specific external subnet
   advertiseRoutes: []
+  # The client stores its machine key in a Kubernetes Secret (<fullname>-client-state)
+  # via tailscaled --state=kube:, keeping a stable node ID across pod restarts
+  # without needing a PVC. RBAC is created automatically. The preauth key is
+  # created as reusable (not ephemeral) so the node persists across restarts.
+  #
   # Expiration for the client preauthkey. Headscale defaults to 1h when
   # omitted, which causes the in-cluster client to lose connectivity once
   # the key expires.  Set to a long duration (default 87600h ≈ 10 years)
-  # to keep the client connected across restarts.  The key is regenerated
-  # on every helm upgrade anyway, so this is effectively non-expiring.
+  # to keep the client connected across restarts.  The key management job
+  # is idempotent and only creates a new key when no valid one exists.
   preauthKeyExpiration: "87600h"
   # Pod disruption budget settings for the optional client deployment.
   podDisruptionBudget:
     enabled: true
     maxUnavailable: 1
-  # Image used by the preauth key creation Job (helm hook)
+  # Image used by the preauth key management Job (helm hook and optional CronJob)
   job:
     image:
       repository: alpine/k8s
       tag: "1.30.2"
       pullPolicy: IfNotPresent
+    # Optional CronJob to periodically ensure the preauth key is valid.
+    # Useful for keeping the client connected indefinitely without helm upgrades.
+    cronjob:
+      enabled: false
+      schedule: "0 */6 * * *"  # Every 6 hours by default
 
 # (UI values defined above; duplicate block removed)

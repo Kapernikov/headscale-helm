@@ -1,0 +1,35 @@
+{{- if and .Values.client.enabled .Values.client.job.cronjob.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "headscale.fullname" . }}-ensure-client-key
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.client.job.cronjob.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          serviceAccountName: {{ include "headscale.fullname" . }}-client-job
+          restartPolicy: OnFailure
+          volumes:
+          - name: job-script
+            configMap:
+              name: {{ include "headscale.fullname" . }}-client-job-script
+              defaultMode: 0755
+          containers:
+          - name: ensure-client-key
+            image: "{{ .Values.client.job.image.repository }}:{{ .Values.client.job.image.tag }}"
+            imagePullPolicy: {{ .Values.client.job.image.pullPolicy }}
+            command: ["/scripts/ensure-client-key.sh"]
+            volumeMounts:
+            - name: job-script
+              mountPath: /scripts
+              readOnly: true
+{{- end }}

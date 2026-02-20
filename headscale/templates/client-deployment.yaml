@@ -19,6 +19,7 @@ spec:
         {{- include "headscale.labels" . | nindent 8 }}
         app.kubernetes.io/component: client
     spec:
+      serviceAccountName: {{ include "headscale.fullname" . }}-client
       volumes:
       - name: dev-net-tun
         hostPath:
@@ -57,13 +58,13 @@ spec:
           {{- end }}
 
           echo "[client] Starting tailscaled"
-          tailscaled &
+          tailscaled --state=kube:{{ include "headscale.fullname" . }}-client-state --socket=/var/run/tailscale/tailscaled.sock &
 
           # If key exists, perform login; otherwise keep running and allow later manual login
           if [ -s "$AUTH_FILE" ]; then
             AUTH_KEY=$(cat "$AUTH_FILE")
             echo "[client] Performing tailscale up"
-            tailscale up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client --login-server=http://{{ include "headscale.fullname" . }}:8080 \
+            tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client --login-server=http://{{ include "headscale.fullname" . }}:8080 \
               {{- if $hasRoutes }}
               --advertise-routes={{ .Values.client.advertiseRoutes | join "," }} \
               {{- end }}

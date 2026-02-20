@@ -141,6 +141,8 @@ $ helm install my-release foo-bar/headscale
 | client.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.image.repository | string | `"tailscale/tailscale"` |  |
 | client.image.tag | string | `"stable"` |  |
+| client.job.cronjob.enabled | bool | `false` |  |
+| client.job.cronjob.schedule | string | `"0 */6 * * *"` |  |
 | client.job.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.job.image.repository | string | `"alpine/k8s"` |  |
 | client.job.image.tag | string | `"1.30.2"` |  |
