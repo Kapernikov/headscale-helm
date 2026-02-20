@@ -168,7 +168,7 @@ derpMap:
     create: true  # When true, the chart creates a ConfigMap using the regions map below.
     name: ""  # Optional override for the ConfigMap name; required when create=false to reference an existing ConfigMap.
     key: derp-map.yaml  # Key inside the ConfigMap data that stores the DERP map payload.
-  regions: {}  # DERP map content (regions, OmitDefaultRegions, etc.) rendered as YAML.
+  content: {}  # DERP map content (regions, OmitDefaultRegions, etc.) rendered as YAML.
 
 # Extra DNS records (MagicDNS)
 extraDnsRecords:

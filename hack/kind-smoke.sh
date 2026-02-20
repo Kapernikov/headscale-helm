@@ -111,17 +111,16 @@ extraDnsRecords:
       value: 100.64.0.42
 derpMap:
   enabled: true
-  regions:
-    OmitDefaultRegions: true
-    Regions:
+  content:
+    regions:
       900:
-        RegionID: 900
-        RegionCode: smoke
-        RegionName: Smoke DERP
-        Nodes:
-          - Name: smoke-derp
-            RegionID: 900
-            HostName: derp.smoke.test
+        regionID: 900
+        regionCode: smoke
+        regionName: Smoke DERP
+        nodes:
+          - name: smoke-derp
+            regionID: 900
+            hostName: derp.smoke.test
 EOF
 
 if [[ $WITH_CLIENT -eq 1 ]]; then
@@ -197,6 +196,22 @@ echo "[verify] Ensuring DERP map ConfigMap contains our region"
 DERP_YAML=$(kubectl get configmap headscale-derp-map -n headscale -o jsonpath='{.data.derp-map\.yaml}')
 if ! grep -q 'derp.smoke.test' <<<"$DERP_YAML"; then
   echo "[ERROR] Expected DERP node not found in headscale-derp-map ConfigMap" >&2
+  exit 1
+fi
+
+echo "[verify] Ensuring DERP map contains 'regions:' key from values"
+if ! grep -q '^regions:' <<<"$DERP_YAML"; then
+  echo "[ERROR] DERP map is missing top-level 'regions:' key" >&2
+  exit 1
+fi
+
+echo "[verify] Ensuring DERP map region keys are numeric (not quoted strings)"
+if grep -qE "['\"]900['\"]:" <<<"$DERP_YAML"; then
+  echo "[ERROR] DERP map region key 900 is quoted as a string instead of a bare integer" >&2
+  exit 1
+fi
+if ! grep -qE '900:' <<<"$DERP_YAML"; then
+  echo "[ERROR] DERP map region key 900 not found as an unquoted integer" >&2
   exit 1
 fi
 
