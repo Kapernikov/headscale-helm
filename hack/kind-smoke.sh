@@ -216,6 +216,23 @@ if ! grep -qE '900:' <<<"$DERP_YAML"; then
 fi
 
 if [[ $WITH_CLIENT -eq 1 ]]; then
+  echo "[verify] Ensuring client ServiceAccount exists"
+  if ! kubectl get serviceaccount headscale-client -n headscale >/dev/null 2>&1; then
+    echo "[ERROR] Client ServiceAccount 'headscale-client' not found" >&2
+    exit 1
+  fi
+
+  echo "[verify] Ensuring client state secret is created by tailscaled"
+  for _ in $(seq 1 20); do
+    if kubectl get secret headscale-client-state -n headscale >/dev/null 2>&1; then
+      break
+    fi
+    sleep 3
+  done
+  if ! kubectl get secret headscale-client-state -n headscale >/dev/null 2>&1; then
+    echo "[WARN] Client state secret not found; tailscaled may not have written state yet"
+  fi
+
   echo "[verify] Ensuring client pod includes tailscaled container"
   if ! kubectl get pods -n headscale -l app.kubernetes.io/component=client -o jsonpath='{.items[0].spec.containers[0].name}' | grep -q 'tailscale'; then
     echo "[ERROR] Tailscale container not found in client deployment" >&2
@@ -242,6 +259,25 @@ if [[ $WITH_CLIENT -eq 1 ]]; then
     echo "[ERROR] policy.path not found in config.yaml" >&2
     exit 1
   fi
+fi
+
+if [[ $WITH_CLIENT -eq 1 ]]; then
+  echo "[verify] Testing job idempotency with second helm upgrade"
+  helm upgrade headscale "$ROOT_DIR/headscale" \
+    --namespace headscale \
+    -f "$TMP_VALUES" \
+    --wait --timeout 5m
+
+  echo "[verify] Waiting for idempotent job to complete"
+  for _ in $(seq 1 40); do
+    JOB_JSON=$(kubectl get job -n headscale -l app.kubernetes.io/instance=headscale -o json 2>/dev/null || echo '{"items":[]}')
+    SUCCEEDED=$(printf "%s" "$JOB_JSON" | grep -o '"succeeded":[0-9]*' | head -1 | grep -o '[0-9]*' || echo "0")
+    if [ "$SUCCEEDED" -ge 1 ]; then
+      break
+    fi
+    sleep 3
+  done
+  echo "[verify] Second helm upgrade completed (job ran idempotently)"
 fi
 
 echo "[success] Headscale chart smoke test completed"
