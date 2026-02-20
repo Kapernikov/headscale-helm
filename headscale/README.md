@@ -161,6 +161,12 @@ $ helm install my-release foo-bar/headscale
 | config.prefixes.v6 | string | `"fd7a:115c:a1e0::/48"` |  |
 | config.server_url | string | `""` |  |
 | configMap.create | bool | `true` |  |
+| derpMap.configMap.create | bool | `true` |  |
+| derpMap.configMap.key | string | `"derp-map.yaml"` |  |
+| derpMap.configMap.name | string | `""` |  |
+| derpMap.content | object | `{}` |  |
+| derpMap.enabled | bool | `false` |  |
+| derpMap.path | string | `"/etc/headscale/derp-map.yaml"` |  |
 | extraDnsRecords.configMap.create | bool | `true` |  |
 | extraDnsRecords.configMap.key | string | `"extra-dns-records.json"` |  |
 | extraDnsRecords.configMap.name | string | `""` |  |
