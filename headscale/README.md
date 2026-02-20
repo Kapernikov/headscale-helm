@@ -142,7 +142,7 @@ $ helm install my-release foo-bar/headscale
 | client.image.repository | string | `"tailscale/tailscale"` |  |
 | client.image.tag | string | `"stable"` |  |
 | client.job.cronjob.enabled | bool | `false` |  |
-| client.job.cronjob.schedule | string | `"0 */6 * * *"` |  |
+| client.job.cronjob.schedule | string | `"0 3 1 * *"` |  |
 | client.job.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.job.image.repository | string | `"alpine/k8s"` |  |
 | client.job.image.tag | string | `"1.30.2"` |  |
@@ -175,6 +175,8 @@ $ helm install my-release foo-bar/headscale
 | extraDnsRecords.enabled | bool | `false` |  |
 | extraDnsRecords.path | string | `"/etc/headscale/extra-dns-records.json"` |  |
 | extraDnsRecords.records | list | `[]` |  |
+| extraVolumeMounts | list | `[]` |  |
+| extraVolumes | list | `[]` |  |
 | fullnameOverride | string | `""` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"headscale/headscale"` |  |

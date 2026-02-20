@@ -235,4 +235,22 @@ client:
       enabled: false
       schedule: "0 3 1 * *"  # First of each month at 03:00 by default
 
+# Extra volumes to add to the Headscale server deployment.
+# Useful for mounting secrets (e.g. OIDC client credentials) or other files.
+# Example:
+#   - name: oidc-client-secret
+#     secret:
+#       secretName: headscale-oidc-credentials
+#       items:
+#         - key: CLIENT_SECRET
+#           path: oidc_client_secret
+extraVolumes: []
+
+# Extra volume mounts to add to the Headscale server container.
+# Example:
+#   - name: oidc-client-secret
+#     mountPath: /etc/headscale/oidc
+#     readOnly: true
+extraVolumeMounts: []
+
 # (UI values defined above; duplicate block removed)
