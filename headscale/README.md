@@ -137,6 +137,7 @@ $ helm install my-release foo-bar/headscale
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | client.advertiseRoutes | list | `[]` |  |
+| client.daemonset | bool | `false` | Run the client as a DaemonSet with hostNetwork, giving every node direct tailnet connectivity. Useful when nodes need to reach tailnet IPs directly (e.g. pulling images from a private registry on the tailnet). |
 | client.enabled | bool | `true` |  |
 | client.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.image.repository | string | `"tailscale/tailscale"` |  |
