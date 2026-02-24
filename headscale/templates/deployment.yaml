@@ -107,7 +107,7 @@ spec:
         {{- if .Values.persistence.enabled }}
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "headscale.fullname" . }}
+            claimName: {{ default (include "headscale.fullname" .) .Values.persistence.existingClaim }}
         {{- end }}
         {{- if .Values.runtime.socketDir }}
         - name: runtime
