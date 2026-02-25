@@ -46,10 +46,10 @@ data:
 
     # --- Step 2: Ensure user exists ---
     echo "[INFO] Ensuring user '$CLIENT_USER' exists and obtaining ID..."
-    USERS_JSON=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -- headscale users list --output json 2>/dev/null || printf 'null')
+    USERS_JSON=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale users list --output json 2>/dev/null || printf 'null')
     USER_ID=$(printf "%s" "$USERS_JSON" | jq -r '(. // []) | .[] | select(.name=="'"$CLIENT_USER"'") | .id' | head -n1)
     if [ -z "${USER_ID:-}" ]; then
-      CREATE_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -- headscale users create "$CLIENT_USER" --output json)
+      CREATE_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale users create "$CLIENT_USER" --output json)
       USER_ID=$(printf "%s" "$CREATE_OUT" | jq -r '.id')
     fi
     if [ -z "$USER_ID" ]; then
@@ -60,7 +60,7 @@ data:
 
     # --- Step 3: Check for existing valid preauth key ---
     echo "[INFO] Checking for existing valid preauth keys..."
-    KEYS_JSON=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -- headscale preauthkeys list -u "$USER_ID" -o json 2>/dev/null || printf 'null')
+    KEYS_JSON=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale preauthkeys list -u "$USER_ID" -o json 2>/dev/null || printf 'null')
     NOW_EPOCH=$(date +%s)
 
     # Extract non-expired keys using shell date for Alpine compatibility
@@ -99,9 +99,9 @@ data:
       AUTH_KEY=""
       for i in 1 2 3 4 5; do
         {{- if gt (len .Values.client.advertiseRoutes) 0 }}
-        PAK_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -- headscale preauthkeys create -u "$USER_ID" --reusable --expiration {{ .Values.client.preauthKeyExpiration | default "87600h" }} --tags tag:in-cluster-client -o json 2>&1 || true)
+        PAK_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale preauthkeys create -u "$USER_ID" --reusable --expiration {{ .Values.client.preauthKeyExpiration | default "87600h" }} --tags tag:in-cluster-client -o json 2>&1 || true)
         {{- else }}
-        PAK_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -- headscale preauthkeys create -u "$USER_ID" --reusable --expiration {{ .Values.client.preauthKeyExpiration | default "87600h" }} -o json 2>&1 || true)
+        PAK_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale preauthkeys create -u "$USER_ID" --reusable --expiration {{ .Values.client.preauthKeyExpiration | default "87600h" }} -o json 2>&1 || true)
         {{- end }}
         AUTH_KEY=$(printf "%s" "$PAK_OUT" | jq -r '.key // empty' | head -n1)
         if [ -n "${AUTH_KEY:-}" ]; then
