@@ -1,7 +1,11 @@
+{{- $fullname := include "headscale.fullname" . -}}
+{{- $tlsSecret := .Values.tls.secretName | default "" -}}
+{{- $modeA := and .Values.client.enabled .Values.ingress.enabled -}}
+{{- $modeB := and (not .Values.ingress.enabled) (ne $tlsSecret "") -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "headscale.fullname" . }}
+  name: {{ $fullname }}
   labels:
     {{- include "headscale.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
@@ -25,6 +29,9 @@ spec:
         {{- if or .Values.policy.enabled (and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0)) }}
         checksum/policy: {{ include (print $.Template.BasePath "/policy-configmap.yaml") . | sha256sum }}
         {{- end }}
+        {{- if $modeA }}
+        checksum/tls-sidecar: {{ include (print $.Template.BasePath "/tls-sidecar-configmap.yaml") . | sha256sum }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -42,6 +49,24 @@ spec:
       serviceAccountName: {{ include "headscale.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if $modeA }}
+      initContainers:
+        - name: generate-internal-tls
+          image: "{{ .Values.client.internalTls.image.repository }}:{{ .Values.client.internalTls.image.tag }}"
+          imagePullPolicy: {{ .Values.client.internalTls.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache openssl >/dev/null 2>&1
+              openssl req -x509 -newkey rsa:2048 -keyout /certs/tls.key -out /certs/tls.crt \
+                -days 3650 -nodes -subj "/CN={{ $fullname }}" \
+                -addext "subjectAltName=DNS:{{ $fullname }},DNS:{{ $fullname }}.{{ .Release.Namespace }},DNS:{{ $fullname }}.{{ .Release.Namespace }}.svc,DNS:{{ $fullname }}.{{ .Release.Namespace }}.svc.cluster.local"
+              chmod 644 /certs/tls.crt /certs/tls.key
+          volumeMounts:
+            - name: internal-tls-certs
+              mountPath: /certs
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
@@ -56,12 +81,28 @@ spec:
             - /etc/headscale/config.yaml
           ports:
             - name: http
-              containerPort: {{ .Values.service.port }}
+              containerPort: {{ if $modeB }}443{{ else }}{{ .Values.service.port }}{{ end }}
               protocol: TCP
           livenessProbe:
+            {{- if $modeB }}
+            {{- $probe := deepCopy .Values.livenessProbe }}
+            {{- if hasKey $probe "httpGet" }}
+            {{- $_ := set $probe.httpGet "scheme" "HTTPS" }}
+            {{- end }}
+            {{- toYaml $probe | nindent 12 }}
+            {{- else }}
             {{- toYaml .Values.livenessProbe | nindent 12 }}
+            {{- end }}
           readinessProbe:
+            {{- if $modeB }}
+            {{- $probe := deepCopy .Values.readinessProbe }}
+            {{- if hasKey $probe "httpGet" }}
+            {{- $_ := set $probe.httpGet "scheme" "HTTPS" }}
+            {{- end }}
+            {{- toYaml $probe | nindent 12 }}
+            {{- else }}
             {{- toYaml .Values.readinessProbe | nindent 12 }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
@@ -76,6 +117,11 @@ spec:
             - name: config
               mountPath: /etc/headscale/config.yaml
               subPath: config.yaml
+            {{- if $modeB }}
+            - name: tls-certs
+              mountPath: /etc/headscale/tls
+              readOnly: true
+            {{- end }}
             {{- if .Values.derpMap.enabled }}
             - name: derp-map
               mountPath: {{ .Values.derpMap.path }}
@@ -103,11 +149,27 @@ spec:
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+        {{- if $modeA }}
+        - name: tls-sidecar
+          image: "{{ .Values.client.internalTls.image.repository }}:{{ .Values.client.internalTls.image.tag }}"
+          imagePullPolicy: {{ .Values.client.internalTls.image.pullPolicy }}
+          ports:
+            - name: https
+              containerPort: 443
+              protocol: TCP
+          volumeMounts:
+            - name: internal-tls-certs
+              mountPath: /certs
+              readOnly: true
+            - name: tls-sidecar-config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+        {{- end }}
       volumes:
         {{- if .Values.persistence.enabled }}
         - name: data
           persistentVolumeClaim:
-            claimName: {{ default (include "headscale.fullname" .) .Values.persistence.existingClaim }}
+            claimName: {{ default $fullname .Values.persistence.existingClaim }}
         {{- end }}
         {{- if .Values.runtime.socketDir }}
         - name: runtime
@@ -115,12 +177,24 @@ spec:
         {{- end }}
         - name: config
           configMap:
-            name: {{ include "headscale.fullname" . }}
+            name: {{ $fullname }}
+        {{- if $modeB }}
+        - name: tls-certs
+          secret:
+            secretName: {{ $tlsSecret }}
+        {{- end }}
+        {{- if $modeA }}
+        - name: internal-tls-certs
+          emptyDir: {}
+        - name: tls-sidecar-config
+          configMap:
+            name: {{ $fullname }}-tls-sidecar
+        {{- end }}
         {{- if .Values.derpMap.enabled }}
         {{- $dm := .Values.derpMap -}}
         {{- $cmName := "" -}}
         {{- if $dm.configMap.create -}}
-          {{- $cmName = default (printf "%s-derp-map" (include "headscale.fullname" .)) $dm.configMap.name -}}
+          {{- $cmName = default (printf "%s-derp-map" $fullname) $dm.configMap.name -}}
         {{- else -}}
           {{- $cmName = required "derpMap.configMap.name must be set when derpMap.configMap.create is false" $dm.configMap.name -}}
         {{- end }}
@@ -132,7 +206,7 @@ spec:
         {{- $extra := .Values.extraDnsRecords -}}
         {{- $cmName := "" -}}
         {{- if $extra.configMap.create -}}
-          {{- $cmName = default (printf "%s-extra-dns" (include "headscale.fullname" .)) $extra.configMap.name -}}
+          {{- $cmName = default (printf "%s-extra-dns" $fullname) $extra.configMap.name -}}
         {{- else -}}
           {{- $cmName = required "extraDnsRecords.configMap.name must be set when extraDnsRecords.configMap.create is false" $extra.configMap.name -}}
         {{- end }}
@@ -145,7 +219,7 @@ spec:
         {{- if and .Values.policy.enabled (not .Values.policy.configMap.create) -}}
           {{- $policyCmName = required "policy.configMap.name must be set when policy.configMap.create is false" .Values.policy.configMap.name -}}
         {{- else -}}
-          {{- $policyCmName = printf "%s-policy" (include "headscale.fullname" .) -}}
+          {{- $policyCmName = printf "%s-policy" $fullname -}}
         {{- end }}
         - name: policy
           configMap:

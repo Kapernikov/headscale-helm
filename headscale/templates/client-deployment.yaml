@@ -1,10 +1,15 @@
 {{- if .Values.client.enabled }}
+{{- $fullname := include "headscale.fullname" . }}
 {{- $hasRoutes := gt (len .Values.client.advertiseRoutes) 0 }}
 {{- $isDaemonSet := .Values.client.daemonset }}
+{{- $tlsSecret := .Values.tls.secretName | default "" }}
+{{- $modeA := .Values.ingress.enabled }}
+{{- $modeB := and (not .Values.ingress.enabled) (ne $tlsSecret "") }}
+{{- $useHttps := or $modeA $modeB }}
 apiVersion: apps/v1
 kind: {{ if $isDaemonSet }}DaemonSet{{ else }}Deployment{{ end }}
 metadata:
-  name: {{ include "headscale.fullname" . }}-client
+  name: {{ $fullname }}-client
   labels:
     {{- include "headscale.labels" . | nindent 4 }}
     app.kubernetes.io/component: client
@@ -22,7 +27,7 @@ spec:
         {{- include "headscale.labels" . | nindent 8 }}
         app.kubernetes.io/component: client
     spec:
-      serviceAccountName: {{ include "headscale.fullname" . }}-client
+      serviceAccountName: {{ $fullname }}-client
       {{- if $isDaemonSet }}
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
@@ -37,8 +42,17 @@ spec:
           type: CharDevice
       - name: client-auth
         secret:
-          secretName: {{ include "headscale.fullname" . }}-client-authkey
+          secretName: {{ $fullname }}-client-authkey
           optional: true
+      {{- if $modeB }}
+      - name: headscale-ca
+        secret:
+          secretName: {{ $tlsSecret }}
+          items:
+          - key: ca.crt
+            path: ca.crt
+          optional: true
+      {{- end }}
       containers:
       - name: tailscale
         image: "{{ .Values.client.image.repository }}:{{ .Values.client.image.tag }}"
@@ -74,11 +88,43 @@ spec:
           sysctl -w net.ipv6.conf.all.forwarding=1
           {{- end }}
 
+          {{- if $modeA }}
+          # Mode A: TOFU — download the sidecar's self-signed cert
+          HS_HOST="{{ $fullname }}.{{ .Release.Namespace }}.svc.cluster.local"
+          echo "[client] Waiting for TLS sidecar at ${HS_HOST}:443 ..."
+          for i in $(seq 1 60); do
+            if echo | openssl s_client -connect "${HS_HOST}:443" -servername "${HS_HOST}" 2>/dev/null | openssl x509 -noout 2>/dev/null; then
+              break
+            fi
+            echo "[client] TLS sidecar not ready yet ($i/60)"
+            sleep 5
+          done
+          echo | openssl s_client -connect "${HS_HOST}:443" -servername "${HS_HOST}" 2>/dev/null | openssl x509 > /tmp/hs.crt 2>/dev/null || true
+          if [ -s /tmp/hs.crt ]; then
+            cat /etc/ssl/certs/ca-certificates.crt /tmp/hs.crt > /tmp/ca-bundle.crt
+            export SSL_CERT_FILE=/tmp/ca-bundle.crt
+            echo "[client] Trusting sidecar TLS certificate (TOFU)"
+          else
+            echo "[client] WARNING: Could not fetch sidecar TLS certificate"
+          fi
+          {{- end }}
+
+          {{- if $modeB }}
+          # Mode B: Trust CA from TLS secret
+          if [ -f /etc/headscale-ca/ca.crt ]; then
+            cat /etc/ssl/certs/ca-certificates.crt /etc/headscale-ca/ca.crt > /tmp/ca-bundle.crt
+            export SSL_CERT_FILE=/tmp/ca-bundle.crt
+            echo "[client] Trusting CA from TLS secret"
+          else
+            echo "[client] WARNING: No ca.crt found in TLS secret; using system CA bundle"
+          fi
+          {{- end }}
+
           echo "[client] Starting tailscaled"
           {{- if $isDaemonSet }}
-          tailscaled --state=kube:{{ include "headscale.fullname" . }}-client-state-${NODE_NAME} --socket=/var/run/tailscale/tailscaled.sock &
+          tailscaled --state=kube:{{ $fullname }}-client-state-${NODE_NAME} --socket=/var/run/tailscale/tailscaled.sock &
           {{- else }}
-          tailscaled --state=kube:{{ include "headscale.fullname" . }}-client-state --socket=/var/run/tailscale/tailscaled.sock &
+          tailscaled --state=kube:{{ $fullname }}-client-state --socket=/var/run/tailscale/tailscaled.sock &
           {{- end }}
 
           # If key exists, perform login; otherwise keep running and allow later manual login
@@ -86,9 +132,17 @@ spec:
             AUTH_KEY=$(cat "$AUTH_FILE")
             echo "[client] Performing tailscale up"
             {{- if $isDaemonSet }}
-            tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client-${NODE_NAME} --login-server=http://{{ include "headscale.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:8080 \
+            {{- if $useHttps }}
+            tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client-${NODE_NAME} --login-server=https://{{ $fullname }}.{{ .Release.Namespace }}.svc.cluster.local:443 \
             {{- else }}
-            tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client --login-server=http://{{ include "headscale.fullname" . }}:8080 \
+            tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client-${NODE_NAME} --login-server=http://{{ $fullname }}.{{ .Release.Namespace }}.svc.cluster.local:8080 \
+            {{- end }}
+            {{- else }}
+            {{- if $useHttps }}
+            tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client --login-server=https://{{ $fullname }}:443 \
+            {{- else }}
+            tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client --login-server=http://{{ $fullname }}:8080 \
+            {{- end }}
             {{- end }}
               {{- if and (ne (.Values.client.acceptDns | toString) "") (ne (.Values.client.acceptDns | toString) "unset") }}
               --accept-dns={{ .Values.client.acceptDns | toString }} \
@@ -123,4 +177,9 @@ spec:
         - name: client-auth
           mountPath: /etc/client-auth
           readOnly: true
+        {{- if $modeB }}
+        - name: headscale-ca
+          mountPath: /etc/headscale-ca
+          readOnly: true
+        {{- end }}
 {{- end }}

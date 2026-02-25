@@ -114,6 +114,15 @@ ui:
     existingClaim: "" # When set, uses an existing PVC instead of creating a new one.
     mountPath: /var/lib/headscale-ui
 
+# TLS configuration for headscale.
+# Without ingress: headscale serves TLS natively using this cert.
+# With ingress: the ingress uses this for external TLS termination; an nginx
+# sidecar handles internal TLS for the in-cluster client.
+# Can be provisioned manually or via cert-manager.
+tls:
+  # -- Name of a Kubernetes TLS Secret (must contain tls.crt, tls.key, optionally ca.crt).
+  secretName: ""
+
 resources: {}
   # We usually recommend not to specify default resources and to leave this as a conscious
   # choice for the user. This also increases chances charts run on environments with little
@@ -233,6 +242,13 @@ client:
   exitNode: false
   # -- Expiration for the client preauthkey. Headscale defaults to 1h when omitted, which causes the in-cluster client to lose connectivity once the key expires. Set to a long duration to keep the client connected across restarts. The key management job is idempotent and only creates a new key when no valid one exists.
   preauthKeyExpiration: "87600h"
+  # -- TLS sidecar settings for internal client connectivity.
+  # Auto-enabled when both client and ingress are active.
+  internalTls:
+    image:
+      repository: nginx
+      tag: "alpine"
+      pullPolicy: IfNotPresent
   # -- Pod disruption budget settings for the optional client deployment.
   podDisruptionBudget:
     enabled: true

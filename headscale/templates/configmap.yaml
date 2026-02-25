@@ -10,14 +10,23 @@ data:
     {{- /* Prepare a copy of the config values so we can mutate server_url */ -}}
     {{- $cfg := dict -}}
     {{- $cfg = merge $cfg .Values.config -}}
+    {{- $tlsSecret := .Values.tls.secretName | default "" -}}
+    {{- $modeB := and (not .Values.ingress.enabled) (ne $tlsSecret "") -}}
     {{- /* If ingress is enabled and no explicit server_url is provided, derive it from ingress host and TLS */ -}}
     {{- if and .Values.ingress.enabled (or (not (hasKey .Values.config "server_url")) (empty .Values.config.server_url)) -}}
-      {{- $scheme := ternary "https" "http" (gt (len .Values.ingress.tls) 0) -}}
+      {{- $hasTls := or (gt (len .Values.ingress.tls) 0) (ne $tlsSecret "") -}}
+      {{- $scheme := ternary "https" "http" $hasTls -}}
       {{- $host := (index .Values.ingress.hosts 0).host -}}
       {{- $_ := set $cfg "server_url" (printf "%s://%s" $scheme $host) -}}
     {{- else if or (not (hasKey .Values.config "server_url")) (empty .Values.config.server_url) -}}
       {{- /* Default to internal service URL if nothing else is set */ -}}
       {{- $_ := set $cfg "server_url" (printf "http://%s.%s.svc.cluster.local:%v" (include "headscale.fullname" .) .Release.Namespace .Values.service.port) -}}
+    {{- end -}}
+    {{- /* Mode B: headscale serves TLS natively */ -}}
+    {{- if $modeB -}}
+      {{- $_ := set $cfg "tls_cert_path" "/etc/headscale/tls/tls.crt" -}}
+      {{- $_ := set $cfg "tls_key_path" "/etc/headscale/tls/tls.key" -}}
+      {{- $_ := set $cfg "listen_addr" "0.0.0.0:443" -}}
     {{- end -}}
     {{- if .Values.extraDnsRecords.enabled -}}
       {{- $dnsConfigInValues := (index .Values.config "dns") | default (dict) -}}
