@@ -27,6 +27,7 @@ Setting `client.daemonset=true` deploys the client as a DaemonSet with `hostNetw
 - The tailscale interface is created on the **host**, not inside a pod network namespace.
 - By default, tailscale's `--accept-dns` flag is **true**, which rewrites the host's `/etc/resolv.conf` to use tailscale's DNS. On nodes without split-DNS support (e.g. **Talos Linux** or any distribution not using `systemd-resolved`), **this will break cluster DNS and can make nodes unreachable**. Set `client.acceptDns: false` to prevent this.
 - IP forwarding (`net.ipv4.ip_forward`) is already enabled on Kubernetes nodes, so the chart does not set it in DaemonSet mode.
+- **Route advertisement in DaemonSet mode:** When `client.advertiseRoutes` is set together with `client.daemonset=true`, every node will advertise the same routes as a subnet router. Headscale will pick one node as the primary router and use the others as failover. This is usually not what you want — it adds redundant subnet routers without real load balancing. If you need subnet routing, consider using the default Deployment mode (single replica) instead.
 
 ### accept-dns (`client.acceptDns`)
 
