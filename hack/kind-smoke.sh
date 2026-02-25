@@ -16,6 +16,7 @@ ROOT_DIR=$(
 CLUSTER_NAME="headscale-kind"
 KEEP_CLUSTER=0
 WITH_CLIENT=0
+WITH_CLIENT_DAEMONSET=0
 
 usage() {
   cat <<EOF
@@ -25,12 +26,14 @@ Options:
   --cluster-name NAME   Override kind cluster name (default: ${CLUSTER_NAME})
   --keep                Do not delete the cluster after the test finishes
   --with-client         Enable the optional Tailscale client with advertiseRoutes
+  --with-client-daemonset  Enable client in DaemonSet mode with hostNetwork
   -h, --help            Show this help message
 
 Environment variables:
   KIND_CLUSTER_NAME     Alternative way to set --cluster-name
   KEEP_CLUSTER          When set to 1, behaves like --keep
   WITH_CLIENT           When set to 1, behaves like --with-client
+  WITH_CLIENT_DAEMONSET When set to 1, behaves like --with-client-daemonset
 EOF
 }
 
@@ -47,6 +50,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --with-client)
       WITH_CLIENT=1
+      shift
+      ;;
+    --with-client-daemonset)
+      WITH_CLIENT_DAEMONSET=1
       shift
       ;;
     -h|--help)
@@ -67,6 +74,9 @@ if [[ ${KEEP_CLUSTER:-0} -eq 1 ]]; then
 fi
 if [[ ${WITH_CLIENT:-0} -eq 1 ]]; then
   WITH_CLIENT=1
+fi
+if [[ ${WITH_CLIENT_DAEMONSET:-0} -eq 1 ]]; then
+  WITH_CLIENT_DAEMONSET=1
 fi
 
 for bin in kind kubectl helm; do
@@ -123,7 +133,13 @@ derpMap:
             hostName: derp.smoke.test
 EOF
 
-if [[ $WITH_CLIENT -eq 1 ]]; then
+if [[ $WITH_CLIENT_DAEMONSET -eq 1 ]]; then
+  cat <<'EOF' >>"$TMP_VALUES"
+client:
+  enabled: true
+  daemonset: true
+EOF
+elif [[ $WITH_CLIENT -eq 1 ]]; then
   cat <<'EOF' >>"$TMP_VALUES"
 client:
   enabled: true
@@ -153,7 +169,7 @@ helm upgrade --install headscale "$ROOT_DIR/headscale" \
 echo "[kubectl] Checking deployment readiness"
 kubectl rollout status deployment/headscale -n headscale --timeout=2m
 
-if [[ $WITH_CLIENT -eq 1 ]]; then
+if [[ $WITH_CLIENT -eq 1 || $WITH_CLIENT_DAEMONSET -eq 1 ]]; then
   echo "[kubectl] Waiting for client auth secret to appear"
   for _ in $(seq 1 40); do
     if kubectl get secret headscale-client-authkey -n headscale >/dev/null 2>&1; then
@@ -164,8 +180,13 @@ if [[ $WITH_CLIENT -eq 1 ]]; then
   if ! kubectl get secret headscale-client-authkey -n headscale >/dev/null 2>&1; then
     echo "[WARN] headscale-client-authkey secret not found; tailscale client login may fail"
   fi
-  echo "[kubectl] Checking client deployment readiness"
-  kubectl rollout status deployment/headscale-client -n headscale --timeout=3m
+  if [[ $WITH_CLIENT_DAEMONSET -eq 1 ]]; then
+    echo "[kubectl] Checking client daemonset readiness"
+    kubectl rollout status daemonset/headscale-client -n headscale --timeout=3m
+  else
+    echo "[kubectl] Checking client deployment readiness"
+    kubectl rollout status deployment/headscale-client -n headscale --timeout=3m
+  fi
 fi
 
 echo "[verify] Ensuring extra_records_path is present in rendered config"
@@ -257,6 +278,34 @@ if [[ $WITH_CLIENT -eq 1 ]]; then
   echo "[verify] Ensuring policy.path is set in headscale config"
   if ! grep -q 'path: /etc/headscale/policy.json' <<<"$CONFIG_YAML"; then
     echo "[ERROR] policy.path not found in config.yaml" >&2
+    exit 1
+  fi
+fi
+
+if [[ $WITH_CLIENT_DAEMONSET -eq 1 ]]; then
+  echo "[verify] Ensuring client runs as DaemonSet"
+  if ! kubectl get daemonset headscale-client -n headscale >/dev/null 2>&1; then
+    echo "[ERROR] Client DaemonSet 'headscale-client' not found" >&2
+    exit 1
+  fi
+
+  echo "[verify] Ensuring client pods have hostNetwork enabled"
+  HOST_NET=$(kubectl get daemonset headscale-client -n headscale -o jsonpath='{.spec.template.spec.hostNetwork}')
+  if [[ "$HOST_NET" != "true" ]]; then
+    echo "[ERROR] hostNetwork is not enabled on client DaemonSet" >&2
+    exit 1
+  fi
+
+  echo "[verify] Ensuring client pods have dnsPolicy=ClusterFirstWithHostNet"
+  DNS_POLICY=$(kubectl get daemonset headscale-client -n headscale -o jsonpath='{.spec.template.spec.dnsPolicy}')
+  if [[ "$DNS_POLICY" != "ClusterFirstWithHostNet" ]]; then
+    echo "[ERROR] dnsPolicy is '$DNS_POLICY' instead of ClusterFirstWithHostNet" >&2
+    exit 1
+  fi
+
+  echo "[verify] Ensuring client pod includes tailscale container"
+  if ! kubectl get pods -n headscale -l app.kubernetes.io/component=client -o jsonpath='{.items[0].spec.containers[0].name}' | grep -q 'tailscale'; then
+    echo "[ERROR] Tailscale container not found in client daemonset" >&2
     exit 1
   fi
 fi

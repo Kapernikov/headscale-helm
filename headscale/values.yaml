@@ -230,6 +230,10 @@ client:
   # not what you want. Consider advertising only specific external subnets instead.
   # Example:
   #   - "10.20.0.0/16"    # specific external subnet
+  # -- Run the client as a DaemonSet with hostNetwork, giving every node direct tailnet connectivity. Useful when nodes need to reach tailnet IPs directly (e.g. pulling images from a private registry on the tailnet).
+  daemonset: false
+  # -- Override tailscale's --accept-dns flag. When unset, tailscale's default (true) is used. Set to false on clusters without systemd-resolved (e.g. Talos) when running in daemonset mode to prevent node DNS hijacking.
+  # acceptDns: false
   advertiseRoutes: []
   # The client stores its machine key in a Kubernetes Secret (<fullname>-client-state)
   # via tailscaled --state=kube:, keeping a stable node ID across pod restarts

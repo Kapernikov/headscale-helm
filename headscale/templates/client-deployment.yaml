@@ -1,14 +1,17 @@
 {{- if .Values.client.enabled }}
 {{- $hasRoutes := gt (len .Values.client.advertiseRoutes) 0 }}
+{{- $isDaemonSet := .Values.client.daemonset }}
 apiVersion: apps/v1
-kind: Deployment
+kind: {{ if $isDaemonSet }}DaemonSet{{ else }}Deployment{{ end }}
 metadata:
   name: {{ include "headscale.fullname" . }}-client
   labels:
     {{- include "headscale.labels" . | nindent 4 }}
     app.kubernetes.io/component: client
 spec:
+  {{- if not $isDaemonSet }}
   replicas: 1
+  {{- end }}
   selector:
     matchLabels:
       {{- include "headscale.selectorLabels" . | nindent 6 }}
@@ -20,6 +23,13 @@ spec:
         app.kubernetes.io/component: client
     spec:
       serviceAccountName: {{ include "headscale.fullname" . }}-client
+      {{- if $isDaemonSet }}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      {{- end }}
       volumes:
       - name: dev-net-tun
         hostPath:
@@ -33,6 +43,13 @@ spec:
       - name: tailscale
         image: "{{ .Values.client.image.repository }}:{{ .Values.client.image.tag }}"
         imagePullPolicy: {{ .Values.client.image.pullPolicy }}
+        {{- if $isDaemonSet }}
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        {{- end }}
         command:
         - /bin/sh
         - -c
@@ -50,21 +67,32 @@ spec:
             sleep 5
           done
 
-          {{- if $hasRoutes }}
-          # Enable IP forwarding for subnet routing / exit node functionality
+          {{- if or $hasRoutes $isDaemonSet }}
+          # Enable IP forwarding for subnet routing / host network connectivity
           echo "[client] Enabling IP forwarding"
           sysctl -w net.ipv4.ip_forward=1
           sysctl -w net.ipv6.conf.all.forwarding=1
           {{- end }}
 
           echo "[client] Starting tailscaled"
+          {{- if $isDaemonSet }}
+          tailscaled --state=kube:{{ include "headscale.fullname" . }}-client-state-${NODE_NAME} --socket=/var/run/tailscale/tailscaled.sock &
+          {{- else }}
           tailscaled --state=kube:{{ include "headscale.fullname" . }}-client-state --socket=/var/run/tailscale/tailscaled.sock &
+          {{- end }}
 
           # If key exists, perform login; otherwise keep running and allow later manual login
           if [ -s "$AUTH_FILE" ]; then
             AUTH_KEY=$(cat "$AUTH_FILE")
             echo "[client] Performing tailscale up"
+            {{- if $isDaemonSet }}
+            tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client-${NODE_NAME} --login-server=http://{{ include "headscale.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:8080 \
+            {{- else }}
             tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client --login-server=http://{{ include "headscale.fullname" . }}:8080 \
+            {{- end }}
+              {{- if not (kindIs "invalid" .Values.client.acceptDns) }}
+              --accept-dns={{ .Values.client.acceptDns | toString }} \
+              {{- end }}
               {{- if $hasRoutes }}
               --advertise-routes={{ .Values.client.advertiseRoutes | join "," }} \
               {{- end }}
@@ -80,7 +108,7 @@ spec:
           wait $! || true
           tail -f /dev/null
         securityContext:
-          {{- if $hasRoutes }}
+          {{- if or $hasRoutes $isDaemonSet }}
           # Privileged mode required to set sysctl for IP forwarding
           privileged: true
           {{- else }}
