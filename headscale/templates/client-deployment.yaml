@@ -108,8 +108,8 @@ spec:
           wait $! || true
           tail -f /dev/null
         securityContext:
-          {{- if $hasRoutes }}
-          # Privileged mode required to set sysctl for IP forwarding
+          {{- if or $hasRoutes $isDaemonSet }}
+          # Privileged mode required for sysctl (routes) or host network manipulation (daemonset)
           privileged: true
           {{- else }}
           capabilities:
