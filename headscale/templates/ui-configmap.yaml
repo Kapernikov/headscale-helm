@@ -1,0 +1,14 @@
+{{- $uiCm := .Values.ui.configMap -}}
+{{- if and .Values.ui.enabled $uiCm.enabled $uiCm.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ default (printf "%s-ui-config" (include "headscale.fullname" .)) $uiCm.name }}
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ui
+data:
+  {{- $key := default "config.yaml" $uiCm.key }}
+  {{ $key }}: |
+    {{- $uiCm.data | toYaml | nindent 4 }}
+{{- end }}

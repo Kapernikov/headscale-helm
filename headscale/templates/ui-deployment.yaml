@@ -14,6 +14,10 @@ spec:
       app.kubernetes.io/component: ui
   template:
     metadata:
+      {{- if .Values.ui.configMap.enabled }}
+      annotations:
+        checksum/ui-config: {{ include (print $.Template.BasePath "/ui-configmap.yaml") . | sha256sum }}
+      {{- end }}
       labels:
         {{- include "headscale.labels" . | nindent 8 }}
         app.kubernetes.io/component: ui
@@ -28,10 +32,10 @@ spec:
           imagePullPolicy: {{ .Values.ui.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: {{ .Values.ui.containerPort }}
               protocol: TCP
           env:
-            - name: HEADSCALE_URL
+            - name: {{ .Values.ui.headscaleUrlEnvName }}
               {{- /*
                    Default precedence for HEADSCALE_URL:
                    1) .Values.ui.headscaleUrl if provided
@@ -57,4 +61,37 @@ spec:
           {{- end }}
           {{- end }}
           {{- end }}
+          {{- if or .Values.ui.configMap.enabled .Values.ui.persistence.enabled }}
+          volumeMounts:
+            {{- if .Values.ui.configMap.enabled }}
+            - name: ui-config
+              mountPath: {{ .Values.ui.configMap.path }}
+              subPath: {{ .Values.ui.configMap.key }}
+              readOnly: true
+            {{- end }}
+            {{- if .Values.ui.persistence.enabled }}
+            - name: ui-data
+              mountPath: {{ .Values.ui.persistence.mountPath }}
+            {{- end }}
+          {{- end }}
+      {{- if or .Values.ui.configMap.enabled .Values.ui.persistence.enabled }}
+      volumes:
+        {{- if .Values.ui.configMap.enabled }}
+          {{- $uiCm := .Values.ui.configMap -}}
+          {{- $cmName := "" -}}
+          {{- if $uiCm.create -}}
+            {{- $cmName = default (printf "%s-ui-config" (include "headscale.fullname" .)) $uiCm.name -}}
+          {{- else -}}
+            {{- $cmName = required "ui.configMap.name must be set when ui.configMap.create is false" $uiCm.name -}}
+          {{- end }}
+        - name: ui-config
+          configMap:
+            name: {{ $cmName }}
+        {{- end }}
+        {{- if .Values.ui.persistence.enabled }}
+        - name: ui-data
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-ui" (include "headscale.fullname" .)) .Values.ui.persistence.existingClaim }}
+        {{- end }}
+      {{- end }}
 {{- end }}

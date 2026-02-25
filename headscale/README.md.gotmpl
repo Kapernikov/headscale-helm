@@ -10,14 +10,18 @@ This Helm chart includes an optional client container that runs a Tailscale clie
 The client container is configured to:
 - Start the `tailscaled` daemon in the background.
 - Use `tailscale up` to connect to the Headscale server.
+- Optionally advertise routes to act as a subnet router.
+- Optionally advertise itself as an exit node.
 
-You can enable or disable the client container via the `client.enabled` value in `values.yaml`.
+You can enable or disable the client container via the `client.enabled` value in `values.yaml`. Configure subnet routing with `client.advertiseRoutes` and exit node functionality with `client.exitNode`.
+
+**Warning:** Using the client as an exit node (or advertising `0.0.0.0/0` and `::/0` routes) exposes all Kubernetes pods and services to nodes using this exit node. This is usually not recommended. Only enable this if you understand the security implications.
 
 ## Persistence
 
 Headscale requires persistence to store its database and noise private key. This chart configures a PersistentVolumeClaim (PVC) to ensure that Headscale's data is not lost across pod restarts or redeployments.
 
-By default, persistence is enabled with a 1Gi volume. You can configure the size through the `persistence` section in `values.yaml`. Data is stored at `/var/lib/headscale` inside the container and this mount path is fixed by the chart.
+By default, persistence is enabled with a 1Gi volume. You can configure the size, access modes, and storage class through the `persistence` section in `values.yaml`. Set `persistence.existingClaim` to reuse a pre-created PVC. Data is stored at `/var/lib/headscale` inside the container and this mount path is fixed by the chart.
 
 ## Ingress
 
@@ -81,6 +85,7 @@ This chart can optionally deploy the community Headscale UI (`gurucomputing/head
 - A separate `Service` named `<release>-headscale-ui` is created on port `ui.service.port` (default 80).
 - When `ingress.enabled=true`, the UI is exposed on the same hostname as Headscale under a subpath (default `/web`). The UI has its own `Ingress` resource that targets the same host as the main ingress, with its path set from `ui.ingress.path`.
 - `HEADSCALE_URL` defaults to the external scheme+host from the main Ingress when Ingress is enabled; otherwise it falls back to the internal cluster service. You can override via `ui.headscaleUrl`.
+- Optional UI persistence creates a PVC and mounts it at `ui.persistence.mountPath`. Set `ui.persistence.existingClaim` to reuse a pre-created PVC.
 
 Example snippet:
 
@@ -100,6 +105,10 @@ ui:
   ingress:
   path: /web
   pathType: ImplementationSpecific
+  persistence:
+    enabled: true
+    mountPath: /var/lib/headscale-ui
+    size: 5Gi
 ```
 
 ## Local Testing with kind

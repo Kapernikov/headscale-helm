@@ -68,6 +68,9 @@ spec:
               {{- if $hasRoutes }}
               --advertise-routes={{ .Values.client.advertiseRoutes | join "," }} \
               {{- end }}
+              {{- if .Values.client.exitNode }}
+              --advertise-exit-node \
+              {{- end }}
               || true
           else
             echo "[client] No preauth key found after timeout; skipping tailscale up for now."

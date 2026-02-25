@@ -23,7 +23,7 @@ podLabels: {}
 # Pod disruption budget settings for the main Headscale server pods.
 podDisruptionBudget:
   enabled: true
-  maxUnavailable: 1  # Allow voluntary disruptions to evict the single replica.
+  maxUnavailable: 1 # Allow voluntary disruptions to evict the single replica.
 
 podSecurityContext:
   fsGroup: 1000
@@ -48,7 +48,7 @@ service:
 ingress:
   enabled: false
   className: "nginx"
-  annotations:
+  annotations: {}
     # Websocket support and long-lived connections for ingress-nginx
     # nginx.ingress.kubernetes.io/client-body-buffer-size: 1m
     # nginx.ingress.kubernetes.io/proxy-body-size: 8000m
@@ -74,6 +74,7 @@ ui:
     repository: ghcr.io/gurucomputing/headscale-ui
     tag: "latest"
     pullPolicy: IfNotPresent
+  containerPort: 8080
   # Pod disruption budget settings for the optional UI deployment.
   podDisruptionBudget:
     enabled: true
@@ -81,9 +82,11 @@ ui:
   # Service for the UI
   service:
     type: ClusterIP
-    port: 80
+    port: 8080
   # If empty, defaults to the internal Headscale service URL
   headscaleUrl: ""
+  # Environment variable name for the Headscale URL for compatibility with different UI implementations (e.g. HEADSCALE_URL for headscale-ui, HEADPLANE_HEADSCALE__URL for headplane)
+  headscaleUrlEnvName: "HEADSCALE_URL"
   # Additional environment variables as a list of {name, value}
   extraEnv: []
   # UI ingress is created only when ui.enabled and ingress.enabled are both true
@@ -93,6 +96,23 @@ ui:
     pathType: ImplementationSpecific
     annotations: {}
     tls: []
+  # Optional ConfigMap for UI configuration file
+  configMap:
+    enabled: false # Set to true to mount a ConfigMap into the UI container.
+    create: true # When true, the chart creates a ConfigMap using the data below.
+    name: "" # Optional override for the ConfigMap name; required when create=false to reference an existing ConfigMap.
+    key: config.yaml # Key inside the ConfigMap data that stores the configuration.
+    path: /app/config.yaml # Path inside the container where the config file will be mounted.
+    data: {} # YAML data for the configuration file when create=true.
+  # Optional persistence for the UI container.
+  persistence:
+    enabled: false
+    size: 1Gi
+    accessModes:
+      - ReadWriteOnce
+    storageClassName: ""
+    existingClaim: "" # When set, uses an existing PVC instead of creating a new one.
+    mountPath: /var/lib/headscale-ui
 
 resources: {}
   # We usually recommend not to specify default resources and to leave this as a conscious
@@ -123,11 +143,14 @@ readinessProbe:
   timeoutSeconds: 3
   failureThreshold: 3
 
-
 # Persistence configuration
 persistence:
   enabled: true
   size: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ""
+  existingClaim: "" # When set, uses an existing PVC instead of creating a new one.
 
 # Headscale configuration
 configMap:
@@ -162,31 +185,31 @@ config:
 
 # Static DERP map file
 derpMap:
-  enabled: false  # Set to true to mount a custom DERP map and add it to derp.paths.
-  path: /etc/headscale/derp-map.yaml  # Path inside the container for the rendered DERP map file.
+  enabled: false # Set to true to mount a custom DERP map and add it to derp.paths.
+  path: /etc/headscale/derp-map.yaml # Path inside the container for the rendered DERP map file.
   configMap:
-    create: true  # When true, the chart creates a ConfigMap using the regions map below.
-    name: ""  # Optional override for the ConfigMap name; required when create=false to reference an existing ConfigMap.
-    key: derp-map.yaml  # Key inside the ConfigMap data that stores the DERP map payload.
-  content: {}  # DERP map content (regions, OmitDefaultRegions, etc.) rendered as YAML.
+    create: true # When true, the chart creates a ConfigMap using the regions map below.
+    name: "" # Optional override for the ConfigMap name; required when create=false to reference an existing ConfigMap.
+    key: derp-map.yaml # Key inside the ConfigMap data that stores the DERP map payload.
+  content: {} # DERP map content (regions, OmitDefaultRegions, etc.) rendered as YAML.
 
 # Extra DNS records (MagicDNS)
 extraDnsRecords:
-  enabled: false  # Set to true to configure dns.extra_records_path and mount the JSON file.
-  path: /etc/headscale/extra-dns-records.json  # Path inside the container for the rendered JSON file.
+  enabled: false # Set to true to configure dns.extra_records_path and mount the JSON file.
+  path: /etc/headscale/extra-dns-records.json # Path inside the container for the rendered JSON file.
   configMap:
-    create: true  # When true, the chart creates a ConfigMap using the records list below.
-    name: ""  # Optional override for the ConfigMap name; required when create=false to reference an existing ConfigMap.
-    key: extra-dns-records.json  # Key inside the ConfigMap data that stores the JSON payload.
-  records: []  # List of {name, type, value} maps that will be rendered as JSON when create=true.
+    create: true # When true, the chart creates a ConfigMap using the records list below.
+    name: "" # Optional override for the ConfigMap name; required when create=false to reference an existing ConfigMap.
+    key: extra-dns-records.json # Key inside the ConfigMap data that stores the JSON payload.
+  records: [] # List of {name, type, value} maps that will be rendered as JSON when create=true.
 
 # ACL policy configuration
 policy:
   enabled: false
   path: /etc/headscale/policy.json
   configMap:
-    create: true    # true = chart creates CM from content below; false = reference existing CM
-    name: ""        # name override (required when create=false)
+    create: true # true = chart creates CM from content below; false = reference existing CM
+    name: "" # name override (required when create=false)
     key: policy.json
   # Inline policy content (used when configMap.create=true).
   # Merged with auto-generated in-cluster client entries when client.advertiseRoutes is set.
@@ -197,9 +220,9 @@ policy:
 client:
   enabled: true
   image:
-      repository: tailscale/tailscale
-      pullPolicy: IfNotPresent
-      tag: "stable"
+    repository: tailscale/tailscale
+    pullPolicy: IfNotPresent
+    tag: "stable"
   # Routes to advertise to the Tailscale network.
   # When configured, IP forwarding is enabled and the client acts as a subnet router.
   # WARNING: Using "0.0.0.0/0" or "::/0" (exit node mode) will also expose all
@@ -213,6 +236,10 @@ client:
   # without needing a PVC. RBAC is created automatically. The preauth key is
   # created as reusable (not ephemeral) so the node persists across restarts.
   #
+  # Enable exit node functionality.
+  # When set to true, the client will be configured as an exit node.
+  # This requires advertiseRoutes to include at least "0.0.0.0/0" and/or "::/0".
+  exitNode: false
   # Expiration for the client preauthkey. Headscale defaults to 1h when
   # omitted, which causes the in-cluster client to lose connectivity once
   # the key expires.  Set to a long duration (default 87600h ≈ 10 years)
@@ -233,7 +260,7 @@ client:
     # Useful for keeping the client connected indefinitely without helm upgrades.
     cronjob:
       enabled: false
-      schedule: "0 3 1 * *"  # First of each month at 03:00 by default
+      schedule: "0 3 1 * *" # First of each month at 03:00 by default
 
 # Extra volumes to add to the Headscale server deployment.
 # Useful for mounting secrets (e.g. OIDC client credentials) or other files.
@@ -252,5 +279,4 @@ extraVolumes: []
 #     mountPath: /etc/headscale/oidc
 #     readOnly: true
 extraVolumeMounts: []
-
 # (UI values defined above; duplicate block removed)

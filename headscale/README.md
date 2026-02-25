@@ -2,7 +2,7 @@
 
 A Helm chart for deploying Headscale, an open-source implementation of the Tailscale control server.
 
-![Version: 0.1.6](https://img.shields.io/badge/Version-0.1.6-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.28.0](https://img.shields.io/badge/AppVersion-0.28.0-informational?style=flat-square)
+![Version: 0.1.6](https://img.shields.io/badge/Version-0.1.6-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.28.0](https://img.shields.io/badge/AppVersion-0.28.0-informational?style=flat-square) 
 
 ## Client Container
 
@@ -11,14 +11,18 @@ This Helm chart includes an optional client container that runs a Tailscale clie
 The client container is configured to:
 - Start the `tailscaled` daemon in the background.
 - Use `tailscale up` to connect to the Headscale server.
+- Optionally advertise routes to act as a subnet router.
+- Optionally advertise itself as an exit node.
 
-You can enable or disable the client container via the `client.enabled` value in `values.yaml`.
+You can enable or disable the client container via the `client.enabled` value in `values.yaml`. Configure subnet routing with `client.advertiseRoutes` and exit node functionality with `client.exitNode`.
+
+**Warning:** Using the client as an exit node (or advertising `0.0.0.0/0` and `::/0` routes) exposes all Kubernetes pods and services to nodes using this exit node. This is usually not recommended. Only enable this if you understand the security implications.
 
 ## Persistence
 
 Headscale requires persistence to store its database and noise private key. This chart configures a PersistentVolumeClaim (PVC) to ensure that Headscale's data is not lost across pod restarts or redeployments.
 
-By default, persistence is enabled with a 1Gi volume. You can configure the size through the `persistence` section in `values.yaml`. Data is stored at `/var/lib/headscale` inside the container and this mount path is fixed by the chart.
+By default, persistence is enabled with a 1Gi volume. You can configure the size, access modes, and storage class through the `persistence` section in `values.yaml`. Set `persistence.existingClaim` to reuse a pre-created PVC. Data is stored at `/var/lib/headscale` inside the container and this mount path is fixed by the chart.
 
 ## Ingress
 
@@ -82,6 +86,7 @@ This chart can optionally deploy the community Headscale UI (`gurucomputing/head
 - A separate `Service` named `<release>-headscale-ui` is created on port `ui.service.port` (default 80).
 - When `ingress.enabled=true`, the UI is exposed on the same hostname as Headscale under a subpath (default `/web`). The UI has its own `Ingress` resource that targets the same host as the main ingress, with its path set from `ui.ingress.path`.
 - `HEADSCALE_URL` defaults to the external scheme+host from the main Ingress when Ingress is enabled; otherwise it falls back to the internal cluster service. You can override via `ui.headscaleUrl`.
+- Optional UI persistence creates a PVC and mounts it at `ui.persistence.mountPath`. Set `ui.persistence.existingClaim` to reuse a pre-created PVC.
 
 Example snippet:
 
@@ -101,6 +106,10 @@ ui:
   ingress:
   path: /web
   pathType: ImplementationSpecific
+  persistence:
+    enabled: true
+    mountPath: /var/lib/headscale-ui
+    size: 5Gi
 ```
 
 ## Local Testing with kind
@@ -132,12 +141,15 @@ $ helm repo add foo-bar http://charts.foo-bar.com
 $ helm install my-release foo-bar/headscale
 ```
 
+
+
 ## Values
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | client.advertiseRoutes | list | `[]` |  |
 | client.enabled | bool | `true` |  |
+| client.exitNode | bool | `false` |  |
 | client.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.image.repository | string | `"tailscale/tailscale"` |  |
 | client.image.tag | string | `"stable"` |  |
@@ -182,7 +194,7 @@ $ helm install my-release foo-bar/headscale
 | image.repository | string | `"headscale/headscale"` |  |
 | image.tag | string | `"v0.28.0"` |  |
 | imagePullSecrets | list | `[]` |  |
-| ingress.annotations | string | `nil` |  |
+| ingress.annotations | object | `{}` |  |
 | ingress.className | string | `"nginx"` |  |
 | ingress.enabled | bool | `false` |  |
 | ingress.hosts[0].host | string | `"headscale.local"` |  |
@@ -196,8 +208,11 @@ $ helm install my-release foo-bar/headscale
 | livenessProbe.periodSeconds | int | `5` |  |
 | livenessProbe.timeoutSeconds | int | `3` |  |
 | nameOverride | string | `""` |  |
+| persistence.accessModes[0] | string | `"ReadWriteOnce"` |  |
 | persistence.enabled | bool | `true` |  |
+| persistence.existingClaim | string | `""` |  |
 | persistence.size | string | `"1Gi"` |  |
+| persistence.storageClassName | string | `""` |  |
 | podAnnotations | object | `{}` |  |
 | podDisruptionBudget.enabled | bool | `true` |  |
 | podDisruptionBudget.maxUnavailable | int | `1` |  |
@@ -228,9 +243,17 @@ $ helm install my-release foo-bar/headscale
 | serviceAccount.annotations | object | `{}` |  |
 | serviceAccount.create | bool | `true` |  |
 | serviceAccount.name | string | `""` |  |
+| ui.configMap.create | bool | `true` |  |
+| ui.configMap.data | object | `{}` |  |
+| ui.configMap.enabled | bool | `false` |  |
+| ui.configMap.key | string | `"config.yaml"` |  |
+| ui.configMap.name | string | `""` |  |
+| ui.configMap.path | string | `"/app/config.yaml"` |  |
+| ui.containerPort | int | `8080` |  |
 | ui.enabled | bool | `false` |  |
 | ui.extraEnv | list | `[]` |  |
 | ui.headscaleUrl | string | `""` |  |
+| ui.headscaleUrlEnvName | string | `"HEADSCALE_URL"` |  |
 | ui.image.pullPolicy | string | `"IfNotPresent"` |  |
 | ui.image.repository | string | `"ghcr.io/gurucomputing/headscale-ui"` |  |
 | ui.image.tag | string | `"latest"` |  |
@@ -239,10 +262,17 @@ $ helm install my-release foo-bar/headscale
 | ui.ingress.path | string | `"/web"` |  |
 | ui.ingress.pathType | string | `"ImplementationSpecific"` |  |
 | ui.ingress.tls | list | `[]` |  |
+| ui.persistence.accessModes[0] | string | `"ReadWriteOnce"` |  |
+| ui.persistence.enabled | bool | `false` |  |
+| ui.persistence.existingClaim | string | `""` |  |
+| ui.persistence.mountPath | string | `"/var/lib/headscale-ui"` |  |
+| ui.persistence.size | string | `"1Gi"` |  |
+| ui.persistence.storageClassName | string | `""` |  |
 | ui.podDisruptionBudget.enabled | bool | `true` |  |
 | ui.podDisruptionBudget.maxUnavailable | int | `1` |  |
-| ui.service.port | int | `80` |  |
+| ui.service.port | int | `8080` |  |
 | ui.service.type | string | `"ClusterIP"` |  |
+
 
 ----------------------------------------------
 Autogenerated from chart metadata using [helm-docs v1.14.2](https://github.com/norwoodj/helm-docs/releases/v1.14.2)
