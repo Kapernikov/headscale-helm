@@ -441,7 +441,7 @@ if [[ $WITH_TLS -eq 1 ]]; then
 
   echo "[verify:tls] Checking client logs for CA trust message"
   CLIENT_POD=$(kubectl get pods -n headscale -l app.kubernetes.io/component=client -o jsonpath='{.items[0].metadata.name}')
-  CLIENT_LOGS=$(kubectl logs "$CLIENT_POD" -n headscale --tail=50 2>/dev/null || true)
+  CLIENT_LOGS=$(kubectl logs "$CLIENT_POD" -n headscale 2>/dev/null || true)
   if grep -q 'Trusting CA from TLS secret' <<<"$CLIENT_LOGS"; then
     echo "[verify:tls] Client correctly trusts CA from TLS secret"
   else
@@ -547,7 +547,7 @@ if [[ $WITH_TLS_SIDECAR -eq 1 ]]; then
   fi
 
   echo "[verify:tls-sidecar] Checking client logs for TOFU trust message"
-  CLIENT_LOGS=$(kubectl logs "$CLIENT_POD" -n headscale --tail=50 2>/dev/null || true)
+  CLIENT_LOGS=$(kubectl logs "$CLIENT_POD" -n headscale 2>/dev/null || true)
   if grep -q 'Trusting sidecar TLS certificate (TOFU)' <<<"$CLIENT_LOGS"; then
     echo "[verify:tls-sidecar] Client correctly trusted sidecar cert via TOFU"
   else
