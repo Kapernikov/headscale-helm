@@ -2,7 +2,7 @@
 
 A Helm chart for deploying Headscale, an open-source implementation of the Tailscale control server.
 
-![Version: 0.1.6](https://img.shields.io/badge/Version-0.1.6-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.28.0](https://img.shields.io/badge/AppVersion-0.28.0-informational?style=flat-square) 
+![Version: 0.1.6](https://img.shields.io/badge/Version-0.1.6-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.28.0](https://img.shields.io/badge/AppVersion-0.28.0-informational?style=flat-square)
 
 ## Client Container
 
@@ -17,6 +17,25 @@ The client container is configured to:
 You can enable or disable the client container via the `client.enabled` value in `values.yaml`. Configure subnet routing with `client.advertiseRoutes` and exit node functionality with `client.exitNode`.
 
 **Warning:** Using the client as an exit node (or advertising `0.0.0.0/0` and `::/0` routes) exposes all Kubernetes pods and services to nodes using this exit node. This is usually not recommended. Only enable this if you understand the security implications.
+
+### DaemonSet Mode
+
+Setting `client.daemonset=true` deploys the client as a DaemonSet with `hostNetwork: true`, giving every node direct tailnet connectivity. This is useful when nodes need to reach tailnet IPs directly (e.g. pulling images from a private registry on the tailnet).
+
+**Warning:** DaemonSet mode uses host networking and runs on every node, directly modifying the host network stack. This means:
+
+- The tailscale interface is created on the **host**, not inside a pod network namespace.
+- By default, tailscale's `--accept-dns` flag is **true**, which rewrites the host's `/etc/resolv.conf` to use tailscale's DNS. On nodes without split-DNS support (e.g. **Talos Linux** or any distribution not using `systemd-resolved`), **this will break cluster DNS and can make nodes unreachable**. Set `client.acceptDns: false` to prevent this.
+- IP forwarding (`net.ipv4.ip_forward`) is already enabled on Kubernetes nodes, so the chart does not set it in DaemonSet mode.
+- **Route advertisement in DaemonSet mode:** When `client.advertiseRoutes` is set together with `client.daemonset=true`, every node will advertise the same routes as a subnet router. Headscale will pick one node as the primary router and use the others as failover. This is usually not what you want — it adds redundant subnet routers without real load balancing. If you need subnet routing, consider using the default Deployment mode (single replica) instead.
+
+### accept-dns (`client.acceptDns`)
+
+By default, tailscale enables `--accept-dns`, meaning it will configure the node to use tailscale's DNS resolver (MagicDNS). When running in Deployment mode (the default) this only affects the pod's network namespace and is generally harmless.
+
+**In DaemonSet mode, this modifies the host's DNS configuration.** If your nodes use `systemd-resolved`, tailscale integrates cleanly via split-DNS. If your nodes do **not** use `systemd-resolved` (e.g. Talos Linux, Alpine-based nodes, many minimal distributions), tailscale will overwrite `/etc/resolv.conf`, breaking all non-tailscale DNS resolution including cluster DNS.
+
+**Recommendation:** When using DaemonSet mode, always set `client.acceptDns: false` unless you have verified that your nodes support split-DNS via `systemd-resolved`.
 
 ## Persistence
 
@@ -141,16 +160,15 @@ $ helm repo add foo-bar http://charts.foo-bar.com
 $ helm install my-release foo-bar/headscale
 ```
 
-
-
 ## Values
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| client.advertiseRoutes | list | `[]` |  |
-| client.daemonset | bool | `false` | Run the client as a DaemonSet with hostNetwork, giving every node direct tailnet connectivity. Useful when nodes need to reach tailnet IPs directly (e.g. pulling images from a private registry on the tailnet). |
-| client.enabled | bool | `true` |  |
-| client.exitNode | bool | `false` |  |
+| client.acceptDns | string | `"unset"` | Override accept-dns flag. In daemonset mode this rewrites the host /etc/resolv.conf. On nodes without split-DNS (e.g. Talos) this breaks cluster DNS. Set to false unless your nodes use systemd-resolved. |
+| client.advertiseRoutes | list | `[]` | Routes to advertise to the Tailscale network. When configured, IP forwarding is enabled and the client acts as a subnet router. WARNING: Using 0.0.0.0/0 or ::/0 (exit node mode) will also expose all Kubernetes pods and services to clients using this exit node. |
+| client.daemonset | bool | `false` | Run the client as a DaemonSet with hostNetwork, giving every node direct tailnet connectivity. Useful when nodes need to reach tailnet IPs directly (e.g. pulling images from a private registry on the tailnet). WARNING: DaemonSet mode uses hostNetwork and runs privileged on every node, modifying the host network stack. Combined with accept-dns (on by default), this can replace the node's DNS resolver and break cluster DNS on distributions without split-DNS support (e.g. Talos Linux). See client.acceptDns. |
+| client.enabled | bool | `true` | Enable or disable the tailscale client container. |
+| client.exitNode | bool | `false` | Enable exit node functionality. When set to true, the client will advertise itself as an exit node. This requires advertiseRoutes to include at least 0.0.0.0/0 and/or ::/0. |
 | client.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.image.repository | string | `"tailscale/tailscale"` |  |
 | client.image.tag | string | `"stable"` |  |
@@ -159,9 +177,8 @@ $ helm install my-release foo-bar/headscale
 | client.job.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.job.image.repository | string | `"alpine/k8s"` |  |
 | client.job.image.tag | string | `"1.30.2"` |  |
-| client.podDisruptionBudget.enabled | bool | `true` |  |
-| client.podDisruptionBudget.maxUnavailable | int | `1` |  |
-| client.preauthKeyExpiration | string | `"87600h"` |  |
+| client.podDisruptionBudget | object | `{"enabled":true,"maxUnavailable":1}` | Pod disruption budget settings for the optional client deployment. |
+| client.preauthKeyExpiration | string | `"87600h"` | Expiration for the client preauthkey. Headscale defaults to 1h when omitted, which causes the in-cluster client to lose connectivity once the key expires. Set to a long duration to keep the client connected across restarts. The key management job is idempotent and only creates a new key when no valid one exists. |
 | config.database.sqlite.path | string | `"/var/lib/headscale/db.sqlite"` |  |
 | config.database.type | string | `"sqlite"` |  |
 | config.derp.urls[0] | string | `"https://controlplane.tailscale.com/derpmap/default"` |  |
@@ -273,7 +290,6 @@ $ helm install my-release foo-bar/headscale
 | ui.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | ui.service.port | int | `8080` |  |
 | ui.service.type | string | `"ClusterIP"` |  |
-
 
 ----------------------------------------------
 Autogenerated from chart metadata using [helm-docs v1.14.2](https://github.com/norwoodj/helm-docs/releases/v1.14.2)
