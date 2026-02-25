@@ -1,3 +1,6 @@
+{{- $tlsSecret := .Values.tls.secretName | default "" -}}
+{{- $modeA := and .Values.client.enabled .Values.ingress.enabled -}}
+{{- $modeB := and (not .Values.ingress.enabled) (ne $tlsSecret "") -}}
 apiVersion: v1
 kind: Service
 metadata:
@@ -7,10 +10,23 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   ports:
+    {{- if $modeB }}
+    - port: 443
+      targetPort: http
+      protocol: TCP
+      name: https
+    {{- else }}
     - port: {{ .Values.service.port }}
       targetPort: http
       protocol: TCP
       name: http
+    {{- if $modeA }}
+    - port: 443
+      targetPort: https
+      protocol: TCP
+      name: https
+    {{- end }}
+    {{- end }}
   selector:
     {{- include "headscale.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: server

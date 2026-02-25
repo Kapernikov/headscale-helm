@@ -1,4 +1,14 @@
 {{- if .Values.ingress.enabled -}}
+{{- $tlsSecret := .Values.tls.secretName | default "" -}}
+{{- /* Auto-populate ingress TLS from tls.secretName when user hasn't set ingress.tls manually */ -}}
+{{- $ingressTls := .Values.ingress.tls -}}
+{{- if and (ne $tlsSecret "") (eq (len $ingressTls) 0) -}}
+  {{- $hosts := list -}}
+  {{- range .Values.ingress.hosts -}}
+    {{- $hosts = append $hosts .host -}}
+  {{- end -}}
+  {{- $ingressTls = list (dict "secretName" $tlsSecret "hosts" $hosts) -}}
+{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -11,9 +21,9 @@ metadata:
   {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
-  {{- if .Values.ingress.tls }}
+  {{- if $ingressTls }}
   tls:
-    {{- range .Values.ingress.tls }}
+    {{- range $ingressTls }}
     - hosts:
         {{- range .hosts }}
         - {{ . | quote }}

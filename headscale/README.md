@@ -37,6 +37,73 @@ By default, tailscale enables `--accept-dns`, meaning it will configure the node
 
 **Recommendation:** When using DaemonSet mode, always set `client.acceptDns: false` unless you have verified that your nodes support split-DNS via `systemd-resolved`.
 
+## TLS for In-Cluster Client
+
+Tailscale v1.78+ has a [known issue](https://github.com/tailscale/tailscale/issues/15008) where reconnects force HTTPS even when the login server was specified with HTTP. This breaks the in-cluster client that connects to headscale over the cluster network. The chart provides TLS support to work around this, with three modes depending on your setup.
+
+### Mode A: With Ingress (sidecar TLS)
+
+When `ingress.enabled=true` and `client.enabled=true`, the chart adds an nginx TLS sidecar to the headscale server pod. The sidecar auto-generates a self-signed certificate and listens on port 443, proxying to headscale on port 8080. The client uses TOFU (trust on first use) to trust the sidecar certificate.
+
+External clients connect through the ingress as before. The sidecar only serves the in-cluster client.
+
+```yaml
+ingress:
+  enabled: true
+  hosts:
+    - host: headscale.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+tls:
+  secretName: headscale-tls  # optional: also configures ingress TLS
+client:
+  enabled: true
+```
+
+### Mode B: Without Ingress (native TLS)
+
+When `ingress.enabled=false` and `tls.secretName` is set, headscale serves TLS natively using the certificate from the secret. The client trusts the CA by mounting `ca.crt` from the same secret (works with cert-manager private CAs and public CAs).
+
+```yaml
+ingress:
+  enabled: false
+tls:
+  secretName: headscale-tls  # must contain tls.crt, tls.key, optionally ca.crt
+client:
+  enabled: true
+```
+
+With cert-manager:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: headscale-tls
+spec:
+  secretName: headscale-tls
+  issuerRef:
+    name: my-ca-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - headscale.default.svc.cluster.local
+```
+
+### Mode C: No TLS (legacy)
+
+When `tls.secretName` is empty and no ingress is enabled, everything stays HTTP. This is the default and works for pinned older tailscale versions that don't have the reconnect bug.
+
+### TLS Decision Logic
+
+| `ingress.enabled` | `tls.secretName` | `client.enabled` | Result |
+|---|---|---|---|
+| true | set | true | Ingress uses secret for external TLS. Sidecar handles internal TLS. Client uses TOFU. |
+| true | unset | true | Ingress HTTP-only. Sidecar handles internal TLS. Client uses TOFU. |
+| false | set | true | Headscale serves TLS natively. Client trusts `ca.crt` from secret. |
+| false | unset | true | Plain HTTP (legacy). |
+| any | any | false | No client deployed. TLS config only affects external access. |
+
 ## Persistence
 
 Headscale requires persistence to store its database and noise private key. This chart configures a PersistentVolumeClaim (PVC) to ensure that Headscale's data is not lost across pod restarts or redeployments.
@@ -172,6 +239,7 @@ $ helm install my-release foo-bar/headscale
 | client.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.image.repository | string | `"tailscale/tailscale"` |  |
 | client.image.tag | string | `"stable"` |  |
+| client.internalTls | object | `{"image":{"pullPolicy":"IfNotPresent","repository":"nginx","tag":"alpine"}}` | TLS sidecar settings for internal client connectivity. Auto-enabled when both client and ingress are active. |
 | client.job.cronjob.enabled | bool | `false` |  |
 | client.job.cronjob.schedule | string | `"0 3 1 * *"` |  |
 | client.job.image.pullPolicy | string | `"IfNotPresent"` |  |
@@ -261,6 +329,7 @@ $ helm install my-release foo-bar/headscale
 | serviceAccount.annotations | object | `{}` |  |
 | serviceAccount.create | bool | `true` |  |
 | serviceAccount.name | string | `""` |  |
+| tls.secretName | string | `""` | Name of a Kubernetes TLS Secret (must contain tls.crt, tls.key, optionally ca.crt). |
 | ui.configMap.create | bool | `true` |  |
 | ui.configMap.data | object | `{}` |  |
 | ui.configMap.enabled | bool | `false` |  |
