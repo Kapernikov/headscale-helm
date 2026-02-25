@@ -296,7 +296,7 @@
             "tag": { "type": "string" }
           }
         },
-        "acceptDns": { "type": "string" },
+        "acceptDns": { "type": ["string", "boolean"] },
         "advertiseRoutes": {
           "type": "array",
           "items": { "type": "string" }
