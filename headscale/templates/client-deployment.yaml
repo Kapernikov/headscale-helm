@@ -198,8 +198,9 @@ spec:
           timeoutSeconds: 5
           failureThreshold: 30
         securityContext:
-          {{- if $hasRoutes }}
+          {{- if and $hasRoutes (not $isDaemonSet) }}
           # Privileged mode required to set sysctl for IP forwarding
+          # (DaemonSet mode uses hostNetwork and skips the sysctl init container)
           privileged: true
           {{- else }}
           capabilities:
