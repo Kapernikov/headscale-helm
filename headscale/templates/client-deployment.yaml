@@ -108,13 +108,14 @@ spec:
           wait $! || true
           tail -f /dev/null
         securityContext:
-          {{- if or $hasRoutes $isDaemonSet }}
-          # Privileged mode required for sysctl (routes) or host network manipulation (daemonset)
+          {{- if $hasRoutes }}
+          # Privileged mode required to set sysctl for IP forwarding
           privileged: true
           {{- else }}
           capabilities:
             add:
             - NET_ADMIN
+            - NET_RAW
           {{- end }}
         volumeMounts:
         - name: dev-net-tun
