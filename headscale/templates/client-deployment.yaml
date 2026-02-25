@@ -44,6 +44,10 @@ spec:
         secret:
           secretName: {{ $fullname }}-client-authkey
           optional: true
+      {{- if $modeA }}
+      - name: tofu-certs
+        emptyDir: {}
+      {{- end }}
       {{- if $modeB }}
       - name: headscale-ca
         secret:
@@ -52,6 +56,38 @@ spec:
           - key: ca.crt
             path: ca.crt
           optional: true
+      {{- end }}
+      {{- if $modeA }}
+      initContainers:
+      - name: tofu-cert-fetch
+        image: "{{ .Values.client.internalTls.image.repository }}:{{ .Values.client.internalTls.image.tag }}"
+        imagePullPolicy: {{ .Values.client.internalTls.image.pullPolicy }}
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -eu
+          apk add --no-cache openssl >/dev/null 2>&1
+          HS_HOST="{{ $fullname }}.{{ .Release.Namespace }}.svc.cluster.local"
+          echo "[tofu] Waiting for TLS sidecar at ${HS_HOST}:443 ..."
+          for i in $(seq 1 120); do
+            if echo | openssl s_client -connect "${HS_HOST}:443" -servername "${HS_HOST}" 2>/dev/null | openssl x509 -noout 2>/dev/null; then
+              echo "[tofu] TLS sidecar is ready"
+              break
+            fi
+            echo "[tofu] TLS sidecar not ready yet ($i/120)"
+            sleep 5
+          done
+          echo | openssl s_client -connect "${HS_HOST}:443" -servername "${HS_HOST}" 2>/dev/null | openssl x509 > /tofu-certs/sidecar.crt 2>/dev/null
+          if [ -s /tofu-certs/sidecar.crt ]; then
+            echo "[tofu] Sidecar TLS certificate saved"
+          else
+            echo "[tofu] ERROR: Could not fetch sidecar TLS certificate" >&2
+            exit 1
+          fi
+        volumeMounts:
+        - name: tofu-certs
+          mountPath: /tofu-certs
       {{- end }}
       containers:
       - name: tailscale
@@ -89,23 +125,13 @@ spec:
           {{- end }}
 
           {{- if $modeA }}
-          # Mode A: TOFU — download the sidecar's self-signed cert
-          HS_HOST="{{ $fullname }}.{{ .Release.Namespace }}.svc.cluster.local"
-          echo "[client] Waiting for TLS sidecar at ${HS_HOST}:443 ..."
-          for i in $(seq 1 60); do
-            if echo | openssl s_client -connect "${HS_HOST}:443" -servername "${HS_HOST}" 2>/dev/null | openssl x509 -noout 2>/dev/null; then
-              break
-            fi
-            echo "[client] TLS sidecar not ready yet ($i/60)"
-            sleep 5
-          done
-          echo | openssl s_client -connect "${HS_HOST}:443" -servername "${HS_HOST}" 2>/dev/null | openssl x509 > /tmp/hs.crt 2>/dev/null || true
-          if [ -s /tmp/hs.crt ]; then
-            cat /etc/ssl/certs/ca-certificates.crt /tmp/hs.crt > /tmp/ca-bundle.crt
+          # Mode A: Trust sidecar cert fetched by init container
+          if [ -s /tofu-certs/sidecar.crt ]; then
+            cat /etc/ssl/certs/ca-certificates.crt /tofu-certs/sidecar.crt > /tmp/ca-bundle.crt
             export SSL_CERT_FILE=/tmp/ca-bundle.crt
             echo "[client] Trusting sidecar TLS certificate (TOFU)"
           else
-            echo "[client] WARNING: Could not fetch sidecar TLS certificate"
+            echo "[client] WARNING: No sidecar certificate found at /tofu-certs/sidecar.crt"
           fi
           {{- end }}
 
@@ -161,6 +187,16 @@ spec:
           # Keep container alive
           wait $! || true
           tail -f /dev/null
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - 'tailscale --socket=/var/run/tailscale/tailscaled.sock status --json | grep -q "BackendState.*Running"'
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
         securityContext:
           {{- if $hasRoutes }}
           # Privileged mode required to set sysctl for IP forwarding
@@ -177,6 +213,11 @@ spec:
         - name: client-auth
           mountPath: /etc/client-auth
           readOnly: true
+        {{- if $modeA }}
+        - name: tofu-certs
+          mountPath: /tofu-certs
+          readOnly: true
+        {{- end }}
         {{- if $modeB }}
         - name: headscale-ca
           mountPath: /etc/headscale-ca

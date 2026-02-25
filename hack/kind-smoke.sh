@@ -526,15 +526,35 @@ if [[ $WITH_TLS_SIDECAR -eq 1 ]]; then
     echo "[WARN] Health check via HTTPS returned $HTTP_CODE (headscale may still be starting)"
   fi
 
-  echo "[verify:tls-sidecar] Checking client logs for TOFU trust message"
+  echo "[verify:tls-sidecar] Ensuring client pod has tofu-cert-fetch init container"
   CLIENT_POD=$(kubectl get pods -n headscale -l app.kubernetes.io/component=client -o jsonpath='{.items[0].metadata.name}')
+  CLIENT_INIT=$(kubectl get pod "$CLIENT_POD" -n headscale -o jsonpath='{.spec.initContainers[*].name}')
+  if echo "$CLIENT_INIT" | grep -q 'tofu-cert-fetch'; then
+    echo "[verify:tls-sidecar] Client init container 'tofu-cert-fetch' present"
+  else
+    echo "[ERROR] tofu-cert-fetch init container not found on client pod" >&2
+    exit 1
+  fi
+
+  echo "[verify:tls-sidecar] Checking that init container completed successfully"
+  INIT_STATUS=$(kubectl get pod "$CLIENT_POD" -n headscale -o jsonpath='{.status.initContainerStatuses[0].state.terminated.reason}')
+  if [[ "$INIT_STATUS" == "Completed" ]]; then
+    echo "[verify:tls-sidecar] Init container completed — cert was fetched"
+  else
+    echo "[ERROR] tofu-cert-fetch init container did not complete (status: $INIT_STATUS)" >&2
+    kubectl logs "$CLIENT_POD" -n headscale -c tofu-cert-fetch --tail=20 2>/dev/null || true
+    exit 1
+  fi
+
+  echo "[verify:tls-sidecar] Checking client logs for TOFU trust message"
   CLIENT_LOGS=$(kubectl logs "$CLIENT_POD" -n headscale --tail=50 2>/dev/null || true)
   if grep -q 'Trusting sidecar TLS certificate (TOFU)' <<<"$CLIENT_LOGS"; then
     echo "[verify:tls-sidecar] Client correctly trusted sidecar cert via TOFU"
   else
-    echo "[WARN] TOFU trust message not found in client logs (may still be starting)"
+    echo "[ERROR] TOFU trust message not found in client logs — cert may not have been mounted" >&2
     echo "[verify:tls-sidecar] Client logs:"
     echo "$CLIENT_LOGS" | tail -20
+    exit 1
   fi
 
   echo "[verify:tls-sidecar] Waiting for client state secret (proves successful TOFU+TLS connection)"
