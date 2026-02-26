@@ -243,7 +243,7 @@ echo "[kubectl] Checking deployment readiness"
 kubectl rollout status deployment/headscale -n headscale --timeout=2m
 
 if [[ $WITH_CLIENT -eq 1 || $WITH_CLIENT_DAEMONSET -eq 1 ]]; then
-  echo "[kubectl] Waiting for client auth secret to appear"
+  echo "[kubectl] Waiting for client auth secret (created by init container)"
   for _ in $(seq 1 40); do
     if kubectl get secret headscale-client-authkey -n headscale >/dev/null 2>&1; then
       break
@@ -384,22 +384,23 @@ if [[ $WITH_CLIENT_DAEMONSET -eq 1 ]]; then
 fi
 
 if [[ $WITH_CLIENT -eq 1 ]]; then
-  echo "[verify] Testing job idempotency with second helm upgrade"
+  echo "[verify] Testing init container idempotency with second helm upgrade"
   helm upgrade headscale "$ROOT_DIR/headscale" \
     --namespace headscale \
     -f "$TMP_VALUES" \
     --wait --timeout 5m
 
-  echo "[verify] Waiting for idempotent job to complete"
-  for _ in $(seq 1 40); do
-    JOB_JSON=$(kubectl get job -n headscale -l app.kubernetes.io/instance=headscale -o json 2>/dev/null || echo '{"items":[]}')
-    SUCCEEDED=$(printf "%s" "$JOB_JSON" | grep -o '"succeeded":[0-9]*' | head -1 | grep -o '[0-9]*' || echo "0")
-    if [ "$SUCCEEDED" -ge 1 ]; then
-      break
-    fi
-    sleep 3
-  done
-  echo "[verify] Second helm upgrade completed (job ran idempotently)"
+  echo "[verify] Checking ensure-authkey init container completed"
+  CLIENT_POD=$(kubectl get pods -n headscale -l app.kubernetes.io/component=client -o jsonpath='{.items[0].metadata.name}')
+  INIT_STATUS=$(kubectl get pod "$CLIENT_POD" -n headscale -o jsonpath='{.status.initContainerStatuses[?(@.name=="ensure-authkey")].state.terminated.reason}')
+  if [[ "$INIT_STATUS" == "Completed" ]]; then
+    echo "[verify] ensure-authkey init container completed successfully"
+  else
+    echo "[ERROR] ensure-authkey init container did not complete (status: $INIT_STATUS)" >&2
+    kubectl logs "$CLIENT_POD" -n headscale -c ensure-authkey --tail=20 2>/dev/null || true
+    exit 1
+  fi
+  echo "[verify] Second helm upgrade completed (init container ran idempotently)"
 fi
 
 if [[ $WITH_TLS -eq 1 ]]; then

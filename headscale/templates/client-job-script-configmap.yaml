@@ -87,6 +87,10 @@ data:
       # Check if the existing secret key is among the valid keys
       if [ -n "$EXISTING_KEY" ] && printf "%s" "$VALID_KEYS" | grep -qxF "$EXISTING_KEY"; then
         echo "[INFO] Authkey secret '$SECRET_NAME' already contains a valid key. Nothing to do."
+        if [ -n "${AUTH_FILE_PATH:-}" ]; then
+          printf "%s" "$EXISTING_KEY" > "$AUTH_FILE_PATH"
+          echo "[INFO] Wrote existing authkey to $AUTH_FILE_PATH"
+        fi
         exit 0
       fi
 
@@ -123,6 +127,12 @@ data:
     kubectl create secret generic "$SECRET_NAME" -n "$NAMESPACE" \
       --from-literal=authkey="$AUTH_KEY" \
       --dry-run=client -o yaml | kubectl apply -f - || { echo "[ERROR] Failed to create/apply secret '$SECRET_NAME'" >&2; exit 1; }
+
+    # If AUTH_FILE_PATH is set (init container mode), also write to local file
+    if [ -n "${AUTH_FILE_PATH:-}" ]; then
+      printf "%s" "$AUTH_KEY" > "$AUTH_FILE_PATH"
+      echo "[INFO] Wrote authkey to $AUTH_FILE_PATH"
+    fi
 
     echo "[INFO] Done."
 {{- end }}
