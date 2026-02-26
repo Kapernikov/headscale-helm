@@ -189,6 +189,9 @@ spec:
               {{- if and (ne (.Values.client.acceptDns | toString) "") (ne (.Values.client.acceptDns | toString) "unset") }}
               --accept-dns={{ .Values.client.acceptDns | toString }} \
               {{- end }}
+              {{- if and (ne (.Values.client.acceptRoutes | toString) "") (ne (.Values.client.acceptRoutes | toString) "unset") }}
+              --accept-routes={{ .Values.client.acceptRoutes | toString }} \
+              {{- end }}
               {{- if $hasRoutes }}
               --advertise-routes={{ .Values.client.advertiseRoutes | join "," }} \
               {{- end }}
