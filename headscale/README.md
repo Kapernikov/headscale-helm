@@ -2,7 +2,7 @@
 
 A Helm chart for deploying Headscale, an open-source implementation of the Tailscale control server.
 
-![Version: 0.1.6](https://img.shields.io/badge/Version-0.1.6-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.28.0](https://img.shields.io/badge/AppVersion-0.28.0-informational?style=flat-square)
+![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.28.0](https://img.shields.io/badge/AppVersion-0.28.0-informational?style=flat-square)
 
 ## Client Container
 
@@ -27,6 +27,8 @@ Setting `client.daemonset=true` deploys the client as a DaemonSet with `hostNetw
 - **Verify no subnet overlap.** The tailscale CGNAT range (`100.64.0.0/10`) and any subnets advertised by other tailscale nodes must not overlap with your cluster's pod CIDR, service CIDR, or node network. Overlapping ranges will cause unpredictable routing and can make pods or services unreachable.
 - **Have a recovery plan.** DaemonSet mode modifies the host network stack directly. If something goes wrong (misconfigured DNS, route conflicts, tailscale crash), nodes can become unreachable over the cluster network. Ensure you have **out-of-band access** to every node (IPMI, cloud serial console, physical console) before enabling this mode.
 - **Set `client.acceptDns: false`** unless you have verified that all nodes use `systemd-resolved` for split-DNS support. Without this, tailscale will overwrite `/etc/resolv.conf` on the host, breaking cluster DNS and making nodes unresolvable. See the [accept-dns](#accept-dns-clientacceptdns) section below.
+- **Cilium users: exclude `tailscale0` from Cilium's device list.** The DaemonSet creates a `tailscale0` TUN device on each node. Cilium discovers all host interfaces and tries to attach XDP (eBPF) programs to them, but TUN devices do not support XDP. This causes Cilium to crash with `attaching XDP program to interface tailscale0: failed` (level=fatal), taking down pod networking on the node. Fix this by setting `--devices` or the `devices` Helm value to whitelist only the interfaces Cilium should manage, or use `bpf.exclude-devices` to blacklist `tailscale0`.
+
 **Warning:** DaemonSet mode uses host networking and runs on every node, directly modifying the host network stack. This means:
 
 - The tailscale interface is created on the **host**, not inside a pod network namespace.
@@ -213,7 +215,7 @@ $ hack/kind-smoke.sh
 
 Use `hack/kind-smoke.sh --keep` to retain the cluster for further inspection.
 
-Pass `--with-client` if you also want to deploy the optional Tailscale sidecar and verify the hook/job flow:
+Pass `--with-client` if you also want to deploy the optional Tailscale sidecar and verify the init container flow:
 
 ```console
 $ hack/kind-smoke.sh --with-client
