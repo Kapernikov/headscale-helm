@@ -21,6 +21,11 @@ You can enable or disable the client container via the `client.enabled` value in
 
 Setting `client.daemonset=true` deploys the client as a DaemonSet with `hostNetwork: true`, giving every node direct tailnet connectivity. This is useful when nodes need to reach tailnet IPs directly (e.g. pulling images from a private registry on the tailnet).
 
+**Risk analysis — steps to take before enabling DaemonSet mode:**
+
+- **Verify no subnet overlap.** The tailscale CGNAT range (`100.64.0.0/10`) and any subnets advertised by other tailscale nodes must not overlap with your cluster's pod CIDR, service CIDR, or node network. Overlapping ranges will cause unpredictable routing and can make pods or services unreachable.
+- **Have a recovery plan.** DaemonSet mode modifies the host network stack directly. If something goes wrong (misconfigured DNS, route conflicts, tailscale crash), nodes can become unreachable over the cluster network. Ensure you have **out-of-band access** to every node (IPMI, cloud serial console, physical console) before enabling this mode.
+- **Set `client.acceptDns: false`** unless you have verified that all nodes use `systemd-resolved` for split-DNS support. Without this, tailscale will overwrite `/etc/resolv.conf` on the host, breaking cluster DNS and making nodes unresolvable. See the [accept-dns](#accept-dns-clientacceptdns) section below.
 **Warning:** DaemonSet mode uses host networking and runs on every node, directly modifying the host network stack. This means:
 
 - The tailscale interface is created on the **host**, not inside a pod network namespace.
@@ -207,7 +212,7 @@ $ hack/kind-smoke.sh
 
 Use `hack/kind-smoke.sh --keep` to retain the cluster for further inspection.
 
-Pass `--with-client` if you also want to deploy the optional Tailscale sidecar and verify the hook/job flow:
+Pass `--with-client` if you also want to deploy the optional Tailscale sidecar and verify the init container flow:
 
 ```console
 $ hack/kind-smoke.sh --with-client

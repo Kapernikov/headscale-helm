@@ -40,10 +40,12 @@ spec:
         hostPath:
           path: /dev/net/tun
           type: CharDevice
-      - name: client-auth
-        secret:
-          secretName: {{ $fullname }}-client-authkey
-          optional: true
+      - name: client-auth-init
+        emptyDir: {}
+      - name: job-script
+        configMap:
+          name: {{ $fullname }}-client-job-script
+          defaultMode: 0755
       {{- if $modeA }}
       - name: tofu-certs
         emptyDir: {}
@@ -57,8 +59,21 @@ spec:
             path: ca.crt
           optional: true
       {{- end }}
-      {{- if $modeA }}
       initContainers:
+      - name: ensure-authkey
+        image: "{{ .Values.client.job.image.repository }}:{{ .Values.client.job.image.tag }}"
+        imagePullPolicy: {{ .Values.client.job.image.pullPolicy }}
+        env:
+        - name: AUTH_FILE_PATH
+          value: /etc/client-auth/authkey
+        command: ["/scripts/ensure-client-key.sh"]
+        volumeMounts:
+        - name: job-script
+          mountPath: /scripts
+          readOnly: true
+        - name: client-auth-init
+          mountPath: /etc/client-auth
+      {{- if $modeA }}
       - name: tofu-cert-fetch
         image: "{{ .Values.client.internalTls.image.repository }}:{{ .Values.client.internalTls.image.tag }}"
         imagePullPolicy: {{ .Values.client.internalTls.image.pullPolicy }}
@@ -212,7 +227,7 @@ spec:
         volumeMounts:
         - name: dev-net-tun
           mountPath: /dev/net/tun
-        - name: client-auth
+        - name: client-auth-init
           mountPath: /etc/client-auth
           readOnly: true
         {{- if $modeA }}
