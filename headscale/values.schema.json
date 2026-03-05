@@ -279,7 +279,23 @@
             "key": { "type": "string" }
           }
         },
-        "content": { "type": "object" }
+        "content": { "type": "object" },
+        "hotReload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "repository": { "type": "string" },
+                "tag": { "type": "string" },
+                "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+              }
+            }
+          }
+        }
       }
     },
     "client": {
