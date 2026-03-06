@@ -239,6 +239,7 @@ $ helm install my-release foo-bar/headscale
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | client.acceptDns | string | `"unset"` | Override accept-dns flag. In daemonset mode this rewrites the host /etc/resolv.conf. On nodes without split-DNS (e.g. Talos) this breaks cluster DNS. Set to false unless your nodes use systemd-resolved. |
+| client.acceptRoutes | string | `"unset"` | Override accept-routes flag. When true, the client accepts subnet routes advertised by other nodes on the tailnet. Defaults to tailscale's built-in default (false) when left as "unset". |
 | client.advertiseRoutes | list | `[]` | Routes to advertise to the Tailscale network. When configured, IP forwarding is enabled and the client acts as a subnet router. WARNING: Using 0.0.0.0/0 or ::/0 (exit node mode) will also expose all Kubernetes pods and services to clients using this exit node. |
 | client.daemonset | bool | `false` | Run the client as a DaemonSet with hostNetwork, giving every node direct tailnet connectivity. Useful when nodes need to reach tailnet IPs directly (e.g. pulling images from a private registry on the tailnet). WARNING: DaemonSet mode uses hostNetwork and runs privileged on every node, modifying the host network stack. Combined with accept-dns (on by default), this can replace the node's DNS resolver and break cluster DNS on distributions without split-DNS support (e.g. Talos Linux). See client.acceptDns. |
 | client.enabled | bool | `true` | Enable or disable the tailscale client container. |
@@ -282,6 +283,12 @@ $ helm install my-release foo-bar/headscale
 | extraDnsRecords.records | list | `[]` |  |
 | extraVolumeMounts | list | `[]` |  |
 | extraVolumes | list | `[]` |  |
+| forbiddenNodeNames.enabled | bool | `false` |  |
+| forbiddenNodeNames.job.image.pullPolicy | string | `"IfNotPresent"` |  |
+| forbiddenNodeNames.job.image.repository | string | `"alpine/k8s"` |  |
+| forbiddenNodeNames.job.image.tag | string | `"1.30.2"` |  |
+| forbiddenNodeNames.names[0] | string | `"localhost"` |  |
+| forbiddenNodeNames.schedule | string | `"*/15 * * * *"` |  |
 | fullnameOverride | string | `""` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"headscale/headscale"` |  |

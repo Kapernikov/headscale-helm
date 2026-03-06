@@ -1,0 +1,35 @@
+{{- if .Values.forbiddenNodeNames.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "headscale.fullname" . }}-rename-forbidden-nodes
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.forbiddenNodeNames.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          serviceAccountName: {{ include "headscale.fullname" . }}-forbidden-names-job
+          restartPolicy: OnFailure
+          volumes:
+          - name: job-script
+            configMap:
+              name: {{ include "headscale.fullname" . }}-forbidden-names-script
+              defaultMode: 0755
+          containers:
+          - name: rename-forbidden-nodes
+            image: "{{ .Values.forbiddenNodeNames.job.image.repository }}:{{ .Values.forbiddenNodeNames.job.image.tag }}"
+            imagePullPolicy: {{ .Values.forbiddenNodeNames.job.image.pullPolicy }}
+            command: ["/scripts/rename-forbidden-nodes.sh"]
+            volumeMounts:
+            - name: job-script
+              mountPath: /scripts
+              readOnly: true
+{{- end }}

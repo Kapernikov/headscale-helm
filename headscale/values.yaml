@@ -267,6 +267,21 @@ client:
       enabled: false
       schedule: "0 3 1 * *" # First of each month at 03:00 by default
 
+# Forbidden node name renamer
+# Periodically renames nodes that registered with forbidden hostnames
+# (e.g. Android clients that default to "localhost") to prevent DNS conflicts.
+forbiddenNodeNames:
+  enabled: false
+  schedule: "*/15 * * * *" # Every 15 minutes
+  # List of hostnames that should be renamed when detected.
+  names:
+    - localhost
+  job:
+    image:
+      repository: alpine/k8s
+      tag: "1.30.2"
+      pullPolicy: IfNotPresent
+
 # Extra volumes to add to the Headscale server deployment.
 # Useful for mounting secrets (e.g. OIDC client credentials) or other files.
 # Example:

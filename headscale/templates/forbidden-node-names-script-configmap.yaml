@@ -1,0 +1,63 @@
+{{- if .Values.forbiddenNodeNames.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "headscale.fullname" . }}-forbidden-names-script
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+data:
+  rename-forbidden-nodes.sh: |
+    #!/bin/sh
+    # Renames nodes whose hostname matches a forbidden name.
+    # Appends the node ID to make the new name unique:
+    #   localhost -> localhost-12345
+    set -eu
+    apk add --no-cache jq >/dev/null 2>&1 || { echo "[ERROR] Failed to install jq via apk" >&2; exit 1; }
+
+    NAMESPACE="{{ .Release.Namespace }}"
+    RELEASE_NAME="{{ .Release.Name }}"
+    LABEL_SELECTOR="app.kubernetes.io/component=server,app.kubernetes.io/instance=$RELEASE_NAME"
+
+    FORBIDDEN_NAMES="{{ join " " .Values.forbiddenNodeNames.names }}"
+
+    # --- Step 1: Find ready headscale pod ---
+    echo "[INFO] Locating a ready headscale pod..."
+    HEADSCALE_POD=""
+    for i in $(seq 1 30); do
+      CANDIDATE=$(kubectl get pods -n "$NAMESPACE" -l "$LABEL_SELECTOR" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | head -n 1)
+      if [ -n "$CANDIDATE" ]; then
+        if kubectl wait --for=condition=ready "pod/$CANDIDATE" -n "$NAMESPACE" --timeout=5s >/dev/null 2>&1; then
+          HEADSCALE_POD="$CANDIDATE"
+          break
+        fi
+      fi
+      echo "[INFO] Waiting for a ready pod... ($i/30)"
+      sleep 5
+    done
+    if [ -z "${HEADSCALE_POD:-}" ]; then
+      echo "[ERROR] No ready headscale pod found within timeout."
+      exit 1
+    fi
+    echo "[INFO] Using pod: $HEADSCALE_POD"
+
+    # --- Step 2: List all nodes ---
+    NODES_JSON=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ $.Chart.Name }} -- headscale nodes list -o json 2>/dev/null || printf '[]')
+
+    RENAMED=0
+    # --- Step 3: Check each node against forbidden names ---
+    printf "%s" "$NODES_JSON" | jq -r '.[] | "\(.id) \(.given_name)"' | while read -r NODE_ID NODE_NAME; do
+      [ -n "$NODE_ID" ] || continue
+      for FORBIDDEN in $FORBIDDEN_NAMES; do
+        if [ "$NODE_NAME" = "$FORBIDDEN" ]; then
+          NEW_NAME="${FORBIDDEN}-${NODE_ID}"
+          echo "[INFO] Renaming node $NODE_ID from '$NODE_NAME' to '$NEW_NAME'"
+          kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ $.Chart.Name }} -- headscale nodes rename -i "$NODE_ID" "$NEW_NAME" || {
+            echo "[WARN] Failed to rename node $NODE_ID"
+          }
+          RENAMED=$((RENAMED + 1))
+        fi
+      done
+    done
+
+    echo "[INFO] Done. Renamed nodes with forbidden hostnames."
+{{- end }}
