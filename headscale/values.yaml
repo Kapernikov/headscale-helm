@@ -270,6 +270,9 @@ client:
 # Forbidden node name renamer
 # Periodically renames nodes that registered with forbidden hostnames
 # (e.g. Android clients that default to "localhost") to prevent DNS conflicts.
+# NOTE: This is a workaround for a limitation in Headscale/Tailscale clients.
+# Should Headscale gain native support for rejecting or renaming nodes with
+# forbidden hostnames, this feature will be removed without hesitation.
 forbiddenNodeNames:
   enabled: false
   schedule: "*/15 * * * *" # Every 15 minutes
