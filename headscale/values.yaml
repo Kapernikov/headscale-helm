@@ -224,6 +224,14 @@ policy:
   # Merged with auto-generated in-cluster client entries when client.advertiseRoutes is set.
   # See https://headscale.net/ref/acls/ for the policy format.
   content: {}
+  # Hot-reload sidecar: watches the policy ConfigMap and syncs changes into the pod
+  # without requiring a restart. Disable if you already use Stakater Reloader or similar.
+  hotReload:
+    enabled: false
+    image:
+      repository: kiwigrid/k8s-sidecar
+      tag: "1.30.3"
+      pullPolicy: IfNotPresent
 
 client:
   # -- Enable or disable the tailscale client container.

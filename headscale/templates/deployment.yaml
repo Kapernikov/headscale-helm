@@ -2,6 +2,8 @@
 {{- $tlsSecret := .Values.tls.secretName | default "" -}}
 {{- $modeA := and .Values.client.enabled .Values.ingress.enabled -}}
 {{- $modeB := and (not .Values.ingress.enabled) (ne $tlsSecret "") -}}
+{{- $needsPolicy := or .Values.policy.enabled (and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0)) -}}
+{{- $hotReload := and $needsPolicy .Values.policy.hotReload.enabled -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,7 +28,7 @@ spec:
         {{- if .Values.extraDnsRecords.enabled }}
         checksum/extra-dns: {{ include (print $.Template.BasePath "/extra-dns-configmap.yaml") . | sha256sum }}
         {{- end }}
-        {{- if or .Values.policy.enabled (and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0)) }}
+        {{- if and $needsPolicy (not $hotReload) }}
         checksum/policy: {{ include (print $.Template.BasePath "/policy-configmap.yaml") . | sha256sum }}
         {{- end }}
         {{- if $modeA }}
@@ -49,8 +51,9 @@ spec:
       serviceAccountName: {{ include "headscale.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- if $modeA }}
+      {{- if or $modeA $hotReload }}
       initContainers:
+        {{- if $modeA }}
         - name: generate-internal-tls
           image: "{{ .Values.client.internalTls.image.repository }}:{{ .Values.client.internalTls.image.tag }}"
           imagePullPolicy: {{ .Values.client.internalTls.image.pullPolicy }}
@@ -66,6 +69,27 @@ spec:
           volumeMounts:
             - name: internal-tls-certs
               mountPath: /certs
+        {{- end }}
+        {{- if $hotReload }}
+        - name: policy-sync
+          image: "{{ .Values.policy.hotReload.image.repository }}:{{ .Values.policy.hotReload.image.tag }}"
+          imagePullPolicy: {{ .Values.policy.hotReload.image.pullPolicy }}
+          restartPolicy: Always
+          env:
+            - name: LABEL
+              value: "headscale-policy"
+            - name: LABEL_VALUE
+              value: "true"
+            - name: FOLDER
+              value: /etc/headscale/policy
+            - name: RESOURCE
+              value: configmap
+            - name: METHOD
+              value: WATCH
+          volumeMounts:
+            - name: policy
+              mountPath: /etc/headscale/policy
+        {{- end }}
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
@@ -138,13 +162,19 @@ spec:
               subPath: {{ default "extra-dns-records.json" .Values.extraDnsRecords.configMap.key }}
               readOnly: true
             {{- end }}
-            {{- if or .Values.policy.enabled (and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0)) }}
+            {{- if $needsPolicy }}
+            {{- if $hotReload }}
+            - name: policy
+              mountPath: /etc/headscale/policy
+              readOnly: true
+            {{- else }}
             {{- $mountPath := ternary .Values.policy.path "/etc/headscale/policy.json" .Values.policy.enabled }}
             {{- $subPath := ternary (.Values.policy.configMap.key | default "policy.json") "policy.json" .Values.policy.enabled }}
             - name: policy
               mountPath: {{ $mountPath }}
               subPath: {{ $subPath }}
               readOnly: true
+            {{- end }}
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
@@ -214,7 +244,11 @@ spec:
           configMap:
             name: {{ $cmName }}
         {{- end }}
-        {{- if or .Values.policy.enabled (and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0)) }}
+        {{- if $needsPolicy }}
+        {{- if $hotReload }}
+        - name: policy
+          emptyDir: {}
+        {{- else }}
         {{- $policyCmName := "" -}}
         {{- if and .Values.policy.enabled (not .Values.policy.configMap.create) -}}
           {{- $policyCmName = required "policy.configMap.name must be set when policy.configMap.create is false" .Values.policy.configMap.name -}}
@@ -224,6 +258,7 @@ spec:
         - name: policy
           configMap:
             name: {{ $policyCmName }}
+        {{- end }}
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

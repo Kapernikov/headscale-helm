@@ -7,6 +7,9 @@ metadata:
   name: {{ include "headscale.fullname" . }}-policy
   labels:
     {{- include "headscale.labels" . | nindent 4 }}
+    {{- if .Values.policy.hotReload.enabled }}
+    headscale-policy: "true"
+    {{- end }}
 data:
   {{ .Values.policy.configMap.key | default "policy.json" }}: |
     {{- if $policyCreate }}

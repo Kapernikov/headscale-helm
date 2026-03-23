@@ -57,8 +57,13 @@ data:
         {{- $_ := set $cfg "policy" (dict) -}}
       {{- end -}}
       {{- $policy := index $cfg "policy" -}}
-      {{- $policyPath := ternary .Values.policy.path "/etc/headscale/policy.json" .Values.policy.enabled -}}
-      {{- $_ := set $policy "path" $policyPath -}}
+      {{- $hotReload := and $needsPolicy .Values.policy.hotReload.enabled -}}
+      {{- if $hotReload -}}
+        {{- $_ := set $policy "path" "/etc/headscale/policy/policy.json" -}}
+      {{- else -}}
+        {{- $policyPath := ternary .Values.policy.path "/etc/headscale/policy.json" .Values.policy.enabled -}}
+        {{- $_ := set $policy "path" $policyPath -}}
+      {{- end -}}
     {{- end -}}
     {{- toYaml $cfg | nindent 4 }}
 {{- end }}

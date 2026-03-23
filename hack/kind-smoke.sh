@@ -19,6 +19,7 @@ WITH_CLIENT=0
 WITH_CLIENT_DAEMONSET=0
 WITH_TLS=0
 WITH_TLS_SIDECAR=0
+WITH_HOT_RELOAD=0
 
 usage() {
   cat <<EOF
@@ -31,6 +32,7 @@ Options:
   --with-client-daemonset  Enable client in DaemonSet mode with hostNetwork
   --with-tls            Enable TLS Mode B (native TLS, no ingress) with self-signed cert
   --with-tls-sidecar    Enable TLS Mode A (ingress + nginx sidecar) with TOFU
+  --with-hot-reload     Enable policy hot-reload sidecar (k8s-sidecar)
   -h, --help            Show this help message
 
 Environment variables:
@@ -40,6 +42,7 @@ Environment variables:
   WITH_CLIENT_DAEMONSET When set to 1, behaves like --with-client-daemonset
   WITH_TLS              When set to 1, behaves like --with-tls
   WITH_TLS_SIDECAR      When set to 1, behaves like --with-tls-sidecar
+  WITH_HOT_RELOAD       When set to 1, behaves like --with-hot-reload
 EOF
 }
 
@@ -70,6 +73,10 @@ while [[ $# -gt 0 ]]; do
       WITH_TLS_SIDECAR=1
       shift
       ;;
+    --with-hot-reload)
+      WITH_HOT_RELOAD=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -97,6 +104,9 @@ if [[ ${WITH_TLS:-0} -eq 1 ]]; then
 fi
 if [[ ${WITH_TLS_SIDECAR:-0} -eq 1 ]]; then
   WITH_TLS_SIDECAR=1
+fi
+if [[ ${WITH_HOT_RELOAD:-0} -eq 1 ]]; then
+  WITH_HOT_RELOAD=1
 fi
 
 REQUIRED_BINS=(kind kubectl helm)
@@ -140,6 +150,10 @@ trap cleanup EXIT
 
 # TLS flags imply client
 if [[ $WITH_TLS -eq 1 || $WITH_TLS_SIDECAR -eq 1 ]]; then
+  WITH_CLIENT=1
+fi
+# Hot-reload needs a policy ConfigMap; imply --with-client for advertiseRoutes
+if [[ $WITH_HOT_RELOAD -eq 1 ]]; then
   WITH_CLIENT=1
 fi
 
@@ -223,6 +237,14 @@ ingress:
       paths:
         - path: /
           pathType: ImplementationSpecific
+EOF
+fi
+
+if [[ $WITH_HOT_RELOAD -eq 1 ]]; then
+  cat <<'EOF' >>"$TMP_VALUES"
+policy:
+  hotReload:
+    enabled: true
 EOF
 fi
 
@@ -349,8 +371,13 @@ if [[ $WITH_CLIENT -eq 1 ]]; then
   fi
 
   echo "[verify] Ensuring policy.path is set in headscale config"
-  if ! grep -q 'path: /etc/headscale/policy.json' <<<"$CONFIG_YAML"; then
-    echo "[ERROR] policy.path not found in config.yaml" >&2
+  if [[ $WITH_HOT_RELOAD -eq 1 ]]; then
+    EXPECTED_POLICY_PATH="/etc/headscale/policy/policy.json"
+  else
+    EXPECTED_POLICY_PATH="/etc/headscale/policy.json"
+  fi
+  if ! grep -q "path: $EXPECTED_POLICY_PATH" <<<"$CONFIG_YAML"; then
+    echo "[ERROR] Expected policy.path '$EXPECTED_POLICY_PATH' not found in config.yaml" >&2
     exit 1
   fi
 fi
@@ -570,6 +597,64 @@ if [[ $WITH_TLS_SIDECAR -eq 1 ]]; then
     echo "[WARN] Client state secret not found; TOFU TLS connection may not have completed yet"
     echo "[verify:tls-sidecar] Dumping client pod logs for debugging:"
     kubectl logs "$CLIENT_POD" -n headscale --tail=30 2>/dev/null || true
+  fi
+fi
+
+if [[ $WITH_HOT_RELOAD -eq 1 ]]; then
+  echo "[verify:hot-reload] Ensuring policy-sync sidecar is running in server pod"
+  SERVER_POD=$(kubectl get pods -n headscale -l app.kubernetes.io/component=server -o jsonpath='{.items[0].metadata.name}')
+  INIT_CONTAINERS=$(kubectl get pod "$SERVER_POD" -n headscale -o jsonpath='{.spec.initContainers[*].name}')
+  if echo "$INIT_CONTAINERS" | grep -q 'policy-sync'; then
+    echo "[verify:hot-reload] policy-sync sidecar container present"
+  else
+    echo "[ERROR] policy-sync sidecar not found in server pod (initContainers: $INIT_CONTAINERS)" >&2
+    exit 1
+  fi
+
+  echo "[verify:hot-reload] Ensuring policy-watcher RBAC resources exist"
+  if ! kubectl get role headscale-policy-watcher -n headscale >/dev/null 2>&1; then
+    echo "[ERROR] Role 'headscale-policy-watcher' not found" >&2
+    exit 1
+  fi
+  if ! kubectl get rolebinding headscale-policy-watcher -n headscale >/dev/null 2>&1; then
+    echo "[ERROR] RoleBinding 'headscale-policy-watcher' not found" >&2
+    exit 1
+  fi
+
+  echo "[verify:hot-reload] Ensuring policy ConfigMap has headscale-policy label"
+  POLICY_LABEL=$(kubectl get configmap headscale-policy -n headscale -o jsonpath='{.metadata.labels.headscale-policy}')
+  if [[ "$POLICY_LABEL" != "true" ]]; then
+    echo "[ERROR] Policy ConfigMap missing headscale-policy=true label (got: '$POLICY_LABEL')" >&2
+    exit 1
+  fi
+
+  echo "[verify:hot-reload] Ensuring headscale config uses directory-based policy path"
+  CONFIG_YAML=$(kubectl get configmap headscale -n headscale -o jsonpath='{.data.config\.yaml}')
+  if ! grep -q 'path: /etc/headscale/policy/policy.json' <<<"$CONFIG_YAML"; then
+    echo "[ERROR] policy.path should be /etc/headscale/policy/policy.json for hot-reload mode" >&2
+    echo "[ERROR] Got: $(grep 'path:' <<<"$CONFIG_YAML" | head -3)" >&2
+    exit 1
+  fi
+
+  echo "[verify:hot-reload] Ensuring policy volume is emptyDir (not ConfigMap)"
+  VOLUME_TYPE=$(kubectl get pod "$SERVER_POD" -n headscale -o jsonpath='{.spec.volumes[?(@.name=="policy")].emptyDir}')
+  if [[ -z "$VOLUME_TYPE" ]]; then
+    echo "[ERROR] policy volume is not emptyDir — sidecar won't be able to write" >&2
+    exit 1
+  fi
+
+  echo "[verify:hot-reload] Waiting for policy-sync sidecar to populate policy file"
+  for _ in $(seq 1 30); do
+    if kubectl exec "$SERVER_POD" -n headscale -c policy-sync -- test -f /etc/headscale/policy/policy.json 2>/dev/null; then
+      echo "[verify:hot-reload] Policy file found at /etc/headscale/policy/policy.json"
+      break
+    fi
+    sleep 2
+  done
+  if ! kubectl exec "$SERVER_POD" -n headscale -c policy-sync -- test -f /etc/headscale/policy/policy.json 2>/dev/null; then
+    echo "[ERROR] policy-sync sidecar did not populate /etc/headscale/policy/policy.json" >&2
+    kubectl logs "$SERVER_POD" -n headscale -c policy-sync --tail=20 2>/dev/null || true
+    exit 1
   fi
 fi
 
