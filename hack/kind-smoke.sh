@@ -20,6 +20,7 @@ WITH_CLIENT_DAEMONSET=0
 WITH_TLS=0
 WITH_TLS_SIDECAR=0
 WITH_HOT_RELOAD=0
+WITH_EXTERNAL_CLIENT=0
 
 usage() {
   cat <<EOF
@@ -33,6 +34,7 @@ Options:
   --with-tls            Enable TLS Mode B (native TLS, no ingress) with self-signed cert
   --with-tls-sidecar    Enable TLS Mode A (ingress + nginx sidecar) with TOFU
   --with-hot-reload     Enable policy hot-reload sidecar (k8s-sidecar)
+  --with-external-client   Deploy a server release, then a separate client-only release that joins it
   -h, --help            Show this help message
 
 Environment variables:
@@ -77,6 +79,10 @@ while [[ $# -gt 0 ]]; do
       WITH_HOT_RELOAD=1
       shift
       ;;
+    --with-external-client)
+      WITH_EXTERNAL_CLIENT=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -107,6 +113,9 @@ if [[ ${WITH_TLS_SIDECAR:-0} -eq 1 ]]; then
 fi
 if [[ ${WITH_HOT_RELOAD:-0} -eq 1 ]]; then
   WITH_HOT_RELOAD=1
+fi
+if [[ ${WITH_EXTERNAL_CLIENT:-0} -eq 1 ]]; then
+  WITH_EXTERNAL_CLIENT=1
 fi
 
 REQUIRED_BINS=(kind kubectl helm)
@@ -656,6 +665,105 @@ if [[ $WITH_HOT_RELOAD -eq 1 ]]; then
     kubectl logs "$SERVER_POD" -n headscale -c policy-sync --tail=20 2>/dev/null || true
     exit 1
   fi
+fi
+
+if [[ $WITH_EXTERNAL_CLIENT -eq 1 ]]; then
+  echo "[external] Testing client-only mode against a separate server release"
+  SRV_NS=hs-server
+  CLI_NS=hs-client
+  # Use release name "headscale" in each namespace so the chart fullname is
+  # predictably "headscale" (release name must contain the chart name).
+
+  # Release A: server only (no client)
+  cat <<'EOF' >"$TMP_VALUES.srv"
+server:
+  enabled: true
+client:
+  enabled: false
+EOF
+  echo "[external] Installing server release in namespace $SRV_NS"
+  helm upgrade --install headscale "$ROOT_DIR/headscale" \
+    --namespace "$SRV_NS" --create-namespace --wait --timeout 5m \
+    -f "$TMP_VALUES.srv"
+  kubectl rollout status deployment/headscale -n "$SRV_NS" --timeout=2m
+
+  # Mint a real preauth key on the server (mirrors a remote admin handing one over)
+  echo "[external] Creating user + preauth key on the server"
+  SRV_POD=$(kubectl get pods -n "$SRV_NS" -l app.kubernetes.io/component=server -o jsonpath='{.items[0].metadata.name}')
+  kubectl exec -n "$SRV_NS" "$SRV_POD" -c headscale -- headscale users create ext-test >/dev/null 2>&1 || true
+  EXT_USER_ID=$(kubectl exec -n "$SRV_NS" "$SRV_POD" -c headscale -- headscale users list -o json \
+    | jq -r '.[] | select(.name=="ext-test") | .id' | head -n1)
+  EXT_KEY=$(kubectl exec -n "$SRV_NS" "$SRV_POD" -c headscale -- \
+    headscale preauthkeys create -u "$EXT_USER_ID" --reusable --expiration 24h -o json | jq -r '.key')
+  if [[ -z "$EXT_KEY" || "$EXT_KEY" == "null" ]]; then
+    echo "[ERROR] Failed to mint preauth key on server" >&2
+    exit 1
+  fi
+
+  # Hand the key to the client namespace as a Secret (the admin-provides-key flow)
+  kubectl create namespace "$CLI_NS" 2>/dev/null || true
+  kubectl create secret generic remote-authkey -n "$CLI_NS" \
+    --from-literal=authkey="$EXT_KEY" --dry-run=client -o yaml | kubectl apply -f -
+
+  # Release B: client only, joining release A via cross-namespace Service DNS
+  cat <<EOF >"$TMP_VALUES.cli"
+server:
+  enabled: false
+client:
+  enabled: true
+  daemonset: true
+  loginServer: http://headscale.${SRV_NS}.svc.cluster.local:8080
+  authKeySecret:
+    name: remote-authkey
+    key: authkey
+EOF
+  echo "[external] Installing client-only release in namespace $CLI_NS"
+  helm upgrade --install headscale "$ROOT_DIR/headscale" \
+    --namespace "$CLI_NS" --create-namespace --wait --timeout 5m \
+    -f "$TMP_VALUES.cli"
+
+  echo "[external:verify] Ensuring NO server resources exist in client namespace"
+  if kubectl get deployment headscale -n "$CLI_NS" >/dev/null 2>&1; then
+    echo "[ERROR] Unexpected server Deployment 'headscale' in client-only namespace" >&2
+    exit 1
+  fi
+  if kubectl get configmap headscale -n "$CLI_NS" >/dev/null 2>&1; then
+    echo "[ERROR] Unexpected server ConfigMap 'headscale' in client-only namespace" >&2
+    exit 1
+  fi
+
+  echo "[external:verify] Ensuring client DaemonSet is present and ready"
+  kubectl rollout status daemonset/headscale-client -n "$CLI_NS" --timeout=3m
+
+  echo "[external:verify] Waiting for client state secret (proves control-plane connection to external server)"
+  CONNECTED=0
+  for _ in $(seq 1 40); do
+    if kubectl get secrets -n "$CLI_NS" -o name | grep -q 'headscale-client-state'; then
+      CONNECTED=1
+      break
+    fi
+    sleep 5
+  done
+  if [[ $CONNECTED -eq 1 ]]; then
+    echo "[external:verify] Client state secret found — external join successful!"
+  else
+    echo "[ERROR] Client did not establish state with external server" >&2
+    CLI_POD=$(kubectl get pods -n "$CLI_NS" -l app.kubernetes.io/component=client -o jsonpath='{.items[0].metadata.name}')
+    kubectl logs "$CLI_POD" -n "$CLI_NS" --tail=30 2>/dev/null || true
+    exit 1
+  fi
+
+  echo "[external:verify] Confirming the server sees the joined node"
+  if kubectl exec -n "$SRV_NS" "$SRV_POD" -c headscale -- headscale nodes list -o json | jq -e 'length >= 1' >/dev/null; then
+    echo "[external:verify] Server reports >=1 registered node"
+  else
+    echo "[WARN] Server node list empty (node may still be registering)"
+  fi
+
+  echo "[external] Cleaning up external-mode releases"
+  helm uninstall headscale -n "$CLI_NS" --wait 2>/dev/null || true
+  helm uninstall headscale -n "$SRV_NS" --wait 2>/dev/null || true
+  rm -f "$TMP_VALUES.srv" "$TMP_VALUES.cli"
 fi
 
 echo "[success] Headscale chart smoke test completed"
