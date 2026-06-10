@@ -241,6 +241,9 @@ $ helm install my-release foo-bar/headscale
 | client.acceptDns | string | `"unset"` | Override accept-dns flag. In daemonset mode this rewrites the host /etc/resolv.conf. On nodes without split-DNS (e.g. Talos) this breaks cluster DNS. Set to false unless your nodes use systemd-resolved. |
 | client.acceptRoutes | string | `"unset"` | Override accept-routes flag. When true, the client accepts subnet routes advertised by other nodes on the tailnet. Defaults to tailscale's built-in default (false) when left as "unset". |
 | client.advertiseRoutes | list | `[]` | Routes to advertise to the Tailscale network. When configured, IP forwarding is enabled and the client acts as a subnet router. WARNING: Using 0.0.0.0/0 or ::/0 (exit node mode) will also expose all Kubernetes pods and services to clients using this exit node. |
+| client.authKey | string | `""` | Inline preauth key for external mode. The chart creates a Secret from it. Mutually exclusive with authKeySecret. Only valid when server.enabled=false. |
+| client.authKeySecret | object | `{"key":"authkey","name":""}` | Reference an existing Secret holding the preauth key (external mode). Mutually exclusive with authKey. Only valid when server.enabled=false. |
+| client.caSecretName | string | `""` | Optional Secret containing a ca.crt to trust the external headscale's TLS certificate (self-signed / private CA). Empty = rely on the system CA bundle (covers Let's Encrypt and other public CAs). Only valid when server.enabled=false. |
 | client.daemonset | bool | `false` | Run the client as a DaemonSet with hostNetwork, giving every node direct tailnet connectivity. Useful when nodes need to reach tailnet IPs directly (e.g. pulling images from a private registry on the tailnet). WARNING: DaemonSet mode uses hostNetwork and runs privileged on every node, modifying the host network stack. Combined with accept-dns (on by default), this can replace the node's DNS resolver and break cluster DNS on distributions without split-DNS support (e.g. Talos Linux). See client.acceptDns. |
 | client.enabled | bool | `true` | Enable or disable the tailscale client container. |
 | client.exitNode | bool | `false` | Enable exit node functionality. When set to true, the client will advertise itself as an exit node. This requires advertiseRoutes to include at least 0.0.0.0/0 and/or ::/0. |
@@ -253,6 +256,7 @@ $ helm install my-release foo-bar/headscale
 | client.job.image.pullPolicy | string | `"IfNotPresent"` |  |
 | client.job.image.repository | string | `"alpine/k8s"` |  |
 | client.job.image.tag | string | `"1.30.2"` |  |
+| client.loginServer | string | `""` | URL of an EXTERNAL headscale to join (client-only mode). Required when server.enabled=false; FORBIDDEN when server.enabled=true. Include the scheme, e.g. https://headscale.example.com |
 | client.podDisruptionBudget | object | `{"enabled":true,"maxUnavailable":1}` | Pod disruption budget settings for the optional client deployment. |
 | client.preauthKeyExpiration | string | `"87600h"` | Expiration for the client preauthkey. Headscale defaults to 1h when omitted, which causes the in-cluster client to lose connectivity once the key expires. Set to a long duration to keep the client connected across restarts. The key management job is idempotent and only creates a new key when no valid one exists. |
 | config.database.sqlite.path | string | `"/var/lib/headscale/db.sqlite"` |  |
@@ -323,6 +327,10 @@ $ helm install my-release foo-bar/headscale
 | policy.configMap.name | string | `""` |  |
 | policy.content | object | `{}` |  |
 | policy.enabled | bool | `false` |  |
+| policy.hotReload.enabled | bool | `false` |  |
+| policy.hotReload.image.pullPolicy | string | `"IfNotPresent"` |  |
+| policy.hotReload.image.repository | string | `"kiwigrid/k8s-sidecar"` |  |
+| policy.hotReload.image.tag | string | `"1.30.3"` |  |
 | policy.path | string | `"/etc/headscale/policy.json"` |  |
 | readinessProbe.failureThreshold | int | `3` |  |
 | readinessProbe.httpGet.path | string | `"/health"` |  |
@@ -338,6 +346,7 @@ $ helm install my-release foo-bar/headscale
 | securityContext.runAsGroup | int | `1000` |  |
 | securityContext.runAsNonRoot | bool | `true` |  |
 | securityContext.runAsUser | int | `1000` |  |
+| server.enabled | bool | `true` |  |
 | service.port | int | `8080` |  |
 | service.type | string | `"ClusterIP"` |  |
 | serviceAccount.annotations | object | `{}` |  |
