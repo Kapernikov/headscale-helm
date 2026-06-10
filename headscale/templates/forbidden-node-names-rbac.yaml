@@ -1,0 +1,39 @@
+{{- if .Values.forbiddenNodeNames.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "headscale.fullname" . }}-forbidden-names-job
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "headscale.fullname" . }}-forbidden-names-job
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "headscale.fullname" . }}-forbidden-names-job
+  labels:
+    {{- include "headscale.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "headscale.fullname" . }}-forbidden-names-job
+subjects:
+- kind: ServiceAccount
+  name: {{ include "headscale.fullname" . }}-forbidden-names-job
+  namespace: {{ .Release.Namespace }}
+{{- end }}
