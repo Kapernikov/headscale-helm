@@ -100,6 +100,52 @@ configuration — the client's system CA bundle already trusts it. Only set
 `caSecretName` when the remote headscale uses a self-signed or private-CA
 certificate.
 
+### Creating the preauth key
+
+Mint **one** key on the remote headscale and share it across the whole cluster —
+you do **not** need a key per node. In DaemonSet mode every node runs
+`tailscale up` with the same key, so it must be **reusable**. Give it a long
+expiration so future and replacement nodes keep enrolling (headscale has no true
+"never"; the in-cluster path of this chart uses `87600h` ≈ 10 years).
+
+Run on the remote headscale (server side):
+
+```bash
+# Create a user/namespace to own the nodes (once)
+headscale users create k8s-ext
+
+# Look up its numeric id
+headscale users list
+
+# Create a reusable, long-lived, tagged preauth key for that user
+headscale preauthkeys create -u <user-id> --reusable --expiration 87600h --tags tag:k8s-ext
+```
+
+Then put the printed key in the chart (inline `client.authKey`, or a Secret
+referenced by `client.authKeySecret`).
+
+**Why `--tags` matters — node-key expiry is separate from key expiry.** Even with
+a long-lived *key*, each enrolled *node* gets a node key that expires on the
+server's default schedule (commonly 180 days), after which the node is logged out
+and must re-authenticate. **Tagged nodes have key-expiry disabled**, so tagging the
+key keeps the cluster enrolled indefinitely. It is also required if you advertise
+routes, since route auto-approval keys off tags. The tag must be declared in the
+remote headscale's ACL policy under `tagOwners`, for example:
+
+```json
+{
+  "tagOwners": {
+    "tag:k8s-ext": ["k8s-ext"]
+  }
+}
+```
+
+Do **not** use `--ephemeral`: ephemeral nodes are removed when they go offline,
+which is wrong for long-lived cluster nodes. The chart persists each node's
+tailscale state in a `<release>-client-state-<nodeName>` Secret, so a node that
+survives a pod restart reuses its state without re-authenticating; only brand-new
+nodes consume the key.
+
 ## TLS for In-Cluster Client
 
 Tailscale v1.78+ has a [known issue](https://github.com/tailscale/tailscale/issues/15008) where reconnects force HTTPS even when the login server was specified with HTTP. This breaks the in-cluster client that connects to headscale over the cluster network. The chart provides TLS support to work around this, with three modes depending on your setup.
