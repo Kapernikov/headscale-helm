@@ -44,6 +44,37 @@ By default, tailscale enables `--accept-dns`, meaning it will configure the node
 
 **Recommendation:** When using DaemonSet mode, always set `client.acceptDns: false` unless you have verified that your nodes support split-DNS via `systemd-resolved`.
 
+## Client-only mode (join an external headscale)
+
+Set `server.enabled=false` to deploy *only* the Tailscale client and join an
+external headscale (for example, a central headscale reached over the internet).
+All server-side resources are skipped. ACLs and subnet-route approval live on the
+remote headscale and are managed by its administrator. The Tailscale Kubernetes
+operator does not work with headscale, so this mode is the supported way to join
+external clusters.
+
+```yaml
+server:
+  enabled: false
+client:
+  enabled: true
+  daemonset: true
+  loginServer: https://headscale.example.com
+  # Provide a preauth key minted on the remote headscale, either inline:
+  authKey: tskey-auth-xxxxxxxxxxxx
+  # ...or by referencing an existing Secret:
+  # authKeySecret:
+  #   name: my-headscale-authkey
+  #   key: authkey
+  # For a self-signed / private-CA remote, mount its CA (empty = system bundle):
+  # caSecretName: remote-headscale-ca
+```
+
+A publicly-trusted remote certificate (e.g. Let's Encrypt) needs no extra
+configuration — the client's system CA bundle already trusts it. Only set
+`caSecretName` when the remote headscale uses a self-signed or private-CA
+certificate.
+
 ## TLS for In-Cluster Client
 
 Tailscale v1.78+ has a [known issue](https://github.com/tailscale/tailscale/issues/15008) where reconnects force HTTPS even when the login server was specified with HTTP. This breaks the in-cluster client that connects to headscale over the cluster network. The chart provides TLS support to work around this, with three modes depending on your setup.
