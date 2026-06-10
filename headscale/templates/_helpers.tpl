@@ -60,3 +60,22 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Validate server/client mode combinations. Each external-mode value is legal in
+exactly one mode. Called from templates/validate.yaml so it always evaluates.
+*/}}
+{{- define "headscale.validate" -}}
+{{- $c := .Values.client -}}
+{{- if .Values.server.enabled -}}
+  {{- if $c.loginServer -}}{{ fail "client.loginServer is only valid when server.enabled=false" }}{{- end -}}
+  {{- if $c.authKey -}}{{ fail "client.authKey is only valid when server.enabled=false" }}{{- end -}}
+  {{- if $c.authKeySecret.name -}}{{ fail "client.authKeySecret.name is only valid when server.enabled=false" }}{{- end -}}
+  {{- if $c.caSecretName -}}{{ fail "client.caSecretName is only valid when server.enabled=false" }}{{- end -}}
+{{- else -}}
+  {{- if not $c.enabled -}}{{ fail "server.enabled=false requires client.enabled=true (nothing to deploy otherwise)" }}{{- end -}}
+  {{- if not $c.loginServer -}}{{ fail "client.loginServer is required when server.enabled=false" }}{{- end -}}
+  {{- if and (not $c.authKey) (not $c.authKeySecret.name) -}}{{ fail "a preauth key is required when server.enabled=false: set client.authKey or client.authKeySecret.name" }}{{- end -}}
+  {{- if and $c.authKey $c.authKeySecret.name -}}{{ fail "set only one of client.authKey or client.authKeySecret.name" }}{{- end -}}
+{{- end -}}
+{{- end -}}
