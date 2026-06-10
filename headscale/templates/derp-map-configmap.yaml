@@ -1,4 +1,4 @@
-{{- if and .Values.derpMap.enabled .Values.derpMap.configMap.create }}
+{{- if and .Values.server.enabled .Values.derpMap.enabled .Values.derpMap.configMap.create }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

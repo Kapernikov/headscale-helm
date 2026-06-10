@@ -1,4 +1,4 @@
-{{- if .Values.forbiddenNodeNames.enabled }}
+{{- if and .Values.server.enabled .Values.forbiddenNodeNames.enabled }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:

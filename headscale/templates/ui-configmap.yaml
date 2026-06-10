@@ -1,5 +1,5 @@
 {{- $uiCm := .Values.ui.configMap -}}
-{{- if and .Values.ui.enabled $uiCm.enabled $uiCm.create }}
+{{- if and .Values.server.enabled .Values.ui.enabled $uiCm.enabled $uiCm.create }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

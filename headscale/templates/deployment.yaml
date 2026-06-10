@@ -1,3 +1,4 @@
+{{- if .Values.server.enabled }}
 {{- $fullname := include "headscale.fullname" . -}}
 {{- $tlsSecret := .Values.tls.secretName | default "" -}}
 {{- $modeA := and .Values.client.enabled .Values.ingress.enabled -}}
@@ -275,3 +276,4 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+{{- end }}

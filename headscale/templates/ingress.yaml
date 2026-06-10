@@ -1,4 +1,4 @@
-{{- if .Values.ingress.enabled -}}
+{{- if and .Values.server.enabled .Values.ingress.enabled -}}
 {{- $tlsSecret := .Values.tls.secretName | default "" -}}
 {{- /* Auto-populate ingress TLS from tls.secretName when user hasn't set ingress.tls manually */ -}}
 {{- $ingressTls := .Values.ingress.tls -}}

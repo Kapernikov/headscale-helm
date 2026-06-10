@@ -1,3 +1,4 @@
+{{- if .Values.server.enabled }}
 {{- $tlsSecret := .Values.tls.secretName | default "" -}}
 {{- $modeA := and .Values.client.enabled .Values.ingress.enabled -}}
 {{- $modeB := and (not .Values.ingress.enabled) (ne $tlsSecret "") -}}
@@ -30,3 +31,4 @@ spec:
   selector:
     {{- include "headscale.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: server
+{{- end }}

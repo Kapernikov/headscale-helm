@@ -1,6 +1,6 @@
 {{- $clientRoutes := and .Values.client.enabled (gt (len .Values.client.advertiseRoutes) 0) -}}
 {{- $policyCreate := and .Values.policy.enabled .Values.policy.configMap.create -}}
-{{- if or $policyCreate (and $clientRoutes (not .Values.policy.enabled)) }}
+{{- if and .Values.server.enabled (or $policyCreate (and $clientRoutes (not .Values.policy.enabled))) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
