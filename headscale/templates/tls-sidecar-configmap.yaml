@@ -1,4 +1,4 @@
-{{- if and .Values.client.enabled .Values.ingress.enabled }}
+{{- if and .Values.server.enabled .Values.client.enabled .Values.ingress.enabled }}
 {{- /* Mode A: ingress + client — nginx sidecar terminates TLS for internal traffic */ -}}
 apiVersion: v1
 kind: ConfigMap

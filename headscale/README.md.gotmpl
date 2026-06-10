@@ -1,3 +1,29 @@
+{{- /*
+Render the values table ourselves so the "Default" column wraps. The built-in
+helm-docs renderer wraps defaults in a backtick code span; long values with no
+spaces (JSON objects, file paths, URLs) then cannot wrap, forcing the Default
+column wide and squeezing the Description column on GitHub. We render the default
+inside <code> with <wbr> break opportunities (zero-width, invisible) after ',',
+'/' and ':', so the cell can wrap and Description keeps its width.
+*/ -}}
+{{- define "chart.valueDefaultColumnRender" -}}
+{{- $v := (default .Default .AutoDefault) -}}
+{{- $v = $v | trimPrefix "`" | trimSuffix "`" -}}
+{{- $v = $v | replace "|" "\\|" -}}
+{{- $v = $v | replace "," ",<wbr>" | replace "/" "/<wbr>" | replace ":" ":<wbr>" -}}
+<code>{{ $v }}</code>
+{{- end -}}
+{{- define "chart.valuesSection" -}}
+{{- if .Values -}}
+## Values
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+{{- range .Values }}
+| {{ .Key }} | {{ .Type }} | {{ template "chart.valueDefaultColumnRender" . }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .AutoDescription }}{{ end }} |
+{{- end }}
+{{- end -}}
+{{- end -}}
 {{ template "chart.header" . }}
 {{ template "chart.description" . }}
 
@@ -42,6 +68,83 @@ By default, tailscale enables `--accept-dns`, meaning it will configure the node
 **In DaemonSet mode, this modifies the host's DNS configuration.** If your nodes use `systemd-resolved`, tailscale integrates cleanly via split-DNS. If your nodes do **not** use `systemd-resolved` (e.g. Talos Linux, Alpine-based nodes, many minimal distributions), tailscale will overwrite `/etc/resolv.conf`, breaking all non-tailscale DNS resolution including cluster DNS.
 
 **Recommendation:** When using DaemonSet mode, always set `client.acceptDns: false` unless you have verified that your nodes support split-DNS via `systemd-resolved`.
+
+## Client-only mode (join an external headscale)
+
+Set `server.enabled=false` to deploy *only* the Tailscale client and join an
+external headscale (for example, a central headscale reached over the internet).
+All server-side resources are skipped. ACLs and subnet-route approval live on the
+remote headscale and are managed by its administrator. The Tailscale Kubernetes
+operator does not work with headscale, so this mode is the supported way to join
+external clusters.
+
+```yaml
+server:
+  enabled: false
+client:
+  enabled: true
+  daemonset: true
+  loginServer: https://headscale.example.com
+  # Provide a preauth key minted on the remote headscale, either inline:
+  authKey: tskey-auth-xxxxxxxxxxxx
+  # ...or by referencing an existing Secret:
+  # authKeySecret:
+  #   name: my-headscale-authkey
+  #   key: authkey
+  # For a self-signed / private-CA remote, mount its CA (empty = system bundle):
+  # caSecretName: remote-headscale-ca
+```
+
+A publicly-trusted remote certificate (e.g. Let's Encrypt) needs no extra
+configuration — the client's system CA bundle already trusts it. Only set
+`caSecretName` when the remote headscale uses a self-signed or private-CA
+certificate.
+
+### Creating the preauth key
+
+Mint **one** key on the remote headscale and share it across the whole cluster —
+you do **not** need a key per node. In DaemonSet mode every node runs
+`tailscale up` with the same key, so it must be **reusable**. Give it a long
+expiration so future and replacement nodes keep enrolling (headscale has no true
+"never"; the in-cluster path of this chart uses `87600h` ≈ 10 years).
+
+Run on the remote headscale (server side):
+
+```bash
+# Create a user/namespace to own the nodes (once)
+headscale users create k8s-ext
+
+# Look up its numeric id
+headscale users list
+
+# Create a reusable, long-lived, tagged preauth key for that user
+headscale preauthkeys create -u <user-id> --reusable --expiration 87600h --tags tag:k8s-ext
+```
+
+Then put the printed key in the chart (inline `client.authKey`, or a Secret
+referenced by `client.authKeySecret`).
+
+**Why `--tags` matters — node-key expiry is separate from key expiry.** Even with
+a long-lived *key*, each enrolled *node* gets a node key that expires on the
+server's default schedule (commonly 180 days), after which the node is logged out
+and must re-authenticate. **Tagged nodes have key-expiry disabled**, so tagging the
+key keeps the cluster enrolled indefinitely. It is also required if you advertise
+routes, since route auto-approval keys off tags. The tag must be declared in the
+remote headscale's ACL policy under `tagOwners`, for example:
+
+```json
+{
+  "tagOwners": {
+    "tag:k8s-ext": ["k8s-ext"]
+  }
+}
+```
+
+Do **not** use `--ephemeral`: ephemeral nodes are removed when they go offline,
+which is wrong for long-lived cluster nodes. The chart persists each node's
+tailscale state in a `<release>-client-state-<nodeName>` Secret, so a node that
+survives a pod restart reuses its state without re-authenticating; only brand-new
+nodes consume the key.
 
 ## TLS for In-Cluster Client
 

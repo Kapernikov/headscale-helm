@@ -44,6 +44,83 @@ By default, tailscale enables `--accept-dns`, meaning it will configure the node
 
 **Recommendation:** When using DaemonSet mode, always set `client.acceptDns: false` unless you have verified that your nodes support split-DNS via `systemd-resolved`.
 
+## Client-only mode (join an external headscale)
+
+Set `server.enabled=false` to deploy *only* the Tailscale client and join an
+external headscale (for example, a central headscale reached over the internet).
+All server-side resources are skipped. ACLs and subnet-route approval live on the
+remote headscale and are managed by its administrator. The Tailscale Kubernetes
+operator does not work with headscale, so this mode is the supported way to join
+external clusters.
+
+```yaml
+server:
+  enabled: false
+client:
+  enabled: true
+  daemonset: true
+  loginServer: https://headscale.example.com
+  # Provide a preauth key minted on the remote headscale, either inline:
+  authKey: tskey-auth-xxxxxxxxxxxx
+  # ...or by referencing an existing Secret:
+  # authKeySecret:
+  #   name: my-headscale-authkey
+  #   key: authkey
+  # For a self-signed / private-CA remote, mount its CA (empty = system bundle):
+  # caSecretName: remote-headscale-ca
+```
+
+A publicly-trusted remote certificate (e.g. Let's Encrypt) needs no extra
+configuration — the client's system CA bundle already trusts it. Only set
+`caSecretName` when the remote headscale uses a self-signed or private-CA
+certificate.
+
+### Creating the preauth key
+
+Mint **one** key on the remote headscale and share it across the whole cluster —
+you do **not** need a key per node. In DaemonSet mode every node runs
+`tailscale up` with the same key, so it must be **reusable**. Give it a long
+expiration so future and replacement nodes keep enrolling (headscale has no true
+"never"; the in-cluster path of this chart uses `87600h` ≈ 10 years).
+
+Run on the remote headscale (server side):
+
+```bash
+# Create a user/namespace to own the nodes (once)
+headscale users create k8s-ext
+
+# Look up its numeric id
+headscale users list
+
+# Create a reusable, long-lived, tagged preauth key for that user
+headscale preauthkeys create -u <user-id> --reusable --expiration 87600h --tags tag:k8s-ext
+```
+
+Then put the printed key in the chart (inline `client.authKey`, or a Secret
+referenced by `client.authKeySecret`).
+
+**Why `--tags` matters — node-key expiry is separate from key expiry.** Even with
+a long-lived *key*, each enrolled *node* gets a node key that expires on the
+server's default schedule (commonly 180 days), after which the node is logged out
+and must re-authenticate. **Tagged nodes have key-expiry disabled**, so tagging the
+key keeps the cluster enrolled indefinitely. It is also required if you advertise
+routes, since route auto-approval keys off tags. The tag must be declared in the
+remote headscale's ACL policy under `tagOwners`, for example:
+
+```json
+{
+  "tagOwners": {
+    "tag:k8s-ext": ["k8s-ext"]
+  }
+}
+```
+
+Do **not** use `--ephemeral`: ephemeral nodes are removed when they go offline,
+which is wrong for long-lived cluster nodes. The chart persists each node's
+tailscale state in a `<release>-client-state-<nodeName>` Secret, so a node that
+survives a pod restart reuses its state without re-authenticating; only brand-new
+nodes consume the key.
+
 ## TLS for In-Cluster Client
 
 Tailscale v1.78+ has a [known issue](https://github.com/tailscale/tailscale/issues/15008) where reconnects force HTTPS even when the login server was specified with HTTP. This breaks the in-cluster client that connects to headscale over the cluster network. The chart provides TLS support to work around this, with three modes depending on your setup.
@@ -238,141 +315,150 @@ $ helm install my-release foo-bar/headscale
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| client.acceptDns | string | `"unset"` | Override accept-dns flag. In daemonset mode this rewrites the host /etc/resolv.conf. On nodes without split-DNS (e.g. Talos) this breaks cluster DNS. Set to false unless your nodes use systemd-resolved. |
-| client.acceptRoutes | string | `"unset"` | Override accept-routes flag. When true, the client accepts subnet routes advertised by other nodes on the tailnet. Defaults to tailscale's built-in default (false) when left as "unset". |
-| client.advertiseRoutes | list | `[]` | Routes to advertise to the Tailscale network. When configured, IP forwarding is enabled and the client acts as a subnet router. WARNING: Using 0.0.0.0/0 or ::/0 (exit node mode) will also expose all Kubernetes pods and services to clients using this exit node. |
-| client.daemonset | bool | `false` | Run the client as a DaemonSet with hostNetwork, giving every node direct tailnet connectivity. Useful when nodes need to reach tailnet IPs directly (e.g. pulling images from a private registry on the tailnet). WARNING: DaemonSet mode uses hostNetwork and runs privileged on every node, modifying the host network stack. Combined with accept-dns (on by default), this can replace the node's DNS resolver and break cluster DNS on distributions without split-DNS support (e.g. Talos Linux). See client.acceptDns. |
-| client.enabled | bool | `true` | Enable or disable the tailscale client container. |
-| client.exitNode | bool | `false` | Enable exit node functionality. When set to true, the client will advertise itself as an exit node. This requires advertiseRoutes to include at least 0.0.0.0/0 and/or ::/0. |
-| client.image.pullPolicy | string | `"IfNotPresent"` |  |
-| client.image.repository | string | `"tailscale/tailscale"` |  |
-| client.image.tag | string | `"stable"` |  |
-| client.internalTls | object | `{"image":{"pullPolicy":"IfNotPresent","repository":"nginx","tag":"alpine"}}` | TLS sidecar settings for internal client connectivity. Auto-enabled when both client and ingress are active. |
-| client.job.cronjob.enabled | bool | `false` |  |
-| client.job.cronjob.schedule | string | `"0 3 1 * *"` |  |
-| client.job.image.pullPolicy | string | `"IfNotPresent"` |  |
-| client.job.image.repository | string | `"alpine/k8s"` |  |
-| client.job.image.tag | string | `"1.30.2"` |  |
-| client.podDisruptionBudget | object | `{"enabled":true,"maxUnavailable":1}` | Pod disruption budget settings for the optional client deployment. |
-| client.preauthKeyExpiration | string | `"87600h"` | Expiration for the client preauthkey. Headscale defaults to 1h when omitted, which causes the in-cluster client to lose connectivity once the key expires. Set to a long duration to keep the client connected across restarts. The key management job is idempotent and only creates a new key when no valid one exists. |
-| config.database.sqlite.path | string | `"/var/lib/headscale/db.sqlite"` |  |
-| config.database.type | string | `"sqlite"` |  |
-| config.derp.urls[0] | string | `"https://controlplane.tailscale.com/derpmap/default"` |  |
-| config.dns.base_domain | string | `"headscale.local"` |  |
-| config.dns.magic_dns | bool | `true` |  |
-| config.dns.nameservers.global[0] | string | `"1.1.1.1"` |  |
-| config.dns.nameservers.global[1] | string | `"8.8.8.8"` |  |
-| config.dns.override_local_dns | bool | `true` |  |
-| config.listen_addr | string | `"0.0.0.0:8080"` |  |
-| config.noise.private_key_path | string | `"/var/lib/headscale/noise_private.key"` |  |
-| config.prefixes.v4 | string | `"100.64.0.0/10"` |  |
-| config.prefixes.v6 | string | `"fd7a:115c:a1e0::/48"` |  |
-| config.server_url | string | `""` |  |
-| configMap.create | bool | `true` |  |
-| derpMap.configMap.create | bool | `true` |  |
-| derpMap.configMap.key | string | `"derp-map.yaml"` |  |
-| derpMap.configMap.name | string | `""` |  |
-| derpMap.content | object | `{}` |  |
-| derpMap.enabled | bool | `false` |  |
-| derpMap.path | string | `"/etc/headscale/derp-map.yaml"` |  |
-| extraDnsRecords.configMap.create | bool | `true` |  |
-| extraDnsRecords.configMap.key | string | `"extra-dns-records.json"` |  |
-| extraDnsRecords.configMap.name | string | `""` |  |
-| extraDnsRecords.enabled | bool | `false` |  |
-| extraDnsRecords.path | string | `"/etc/headscale/extra-dns-records.json"` |  |
-| extraDnsRecords.records | list | `[]` |  |
-| extraVolumeMounts | list | `[]` |  |
-| extraVolumes | list | `[]` |  |
-| forbiddenNodeNames.enabled | bool | `false` |  |
-| forbiddenNodeNames.job.image.pullPolicy | string | `"IfNotPresent"` |  |
-| forbiddenNodeNames.job.image.repository | string | `"alpine/k8s"` |  |
-| forbiddenNodeNames.job.image.tag | string | `"1.30.2"` |  |
-| forbiddenNodeNames.names[0] | string | `"localhost"` |  |
-| forbiddenNodeNames.schedule | string | `"*/15 * * * *"` |  |
-| fullnameOverride | string | `""` |  |
-| image.pullPolicy | string | `"IfNotPresent"` |  |
-| image.repository | string | `"headscale/headscale"` |  |
-| image.tag | string | `"v0.28.0"` |  |
-| imagePullSecrets | list | `[]` |  |
-| ingress.annotations | object | `{}` |  |
-| ingress.className | string | `"nginx"` |  |
-| ingress.enabled | bool | `false` |  |
-| ingress.hosts[0].host | string | `"headscale.local"` |  |
-| ingress.hosts[0].paths[0].path | string | `"/"` |  |
-| ingress.hosts[0].paths[0].pathType | string | `"ImplementationSpecific"` |  |
-| ingress.tls | list | `[]` |  |
-| livenessProbe.failureThreshold | int | `3` |  |
-| livenessProbe.httpGet.path | string | `"/health"` |  |
-| livenessProbe.httpGet.port | string | `"http"` |  |
-| livenessProbe.initialDelaySeconds | int | `10` |  |
-| livenessProbe.periodSeconds | int | `5` |  |
-| livenessProbe.timeoutSeconds | int | `3` |  |
-| nameOverride | string | `""` |  |
-| persistence.accessModes[0] | string | `"ReadWriteOnce"` |  |
-| persistence.enabled | bool | `true` |  |
-| persistence.existingClaim | string | `""` |  |
-| persistence.size | string | `"1Gi"` |  |
-| persistence.storageClassName | string | `""` |  |
-| podAnnotations | object | `{}` |  |
-| podDisruptionBudget.enabled | bool | `true` |  |
-| podDisruptionBudget.maxUnavailable | int | `1` |  |
-| podLabels | object | `{}` |  |
-| podSecurityContext.fsGroup | int | `1000` |  |
-| policy.configMap.create | bool | `true` |  |
-| policy.configMap.key | string | `"policy.json"` |  |
-| policy.configMap.name | string | `""` |  |
-| policy.content | object | `{}` |  |
-| policy.enabled | bool | `false` |  |
-| policy.path | string | `"/etc/headscale/policy.json"` |  |
-| readinessProbe.failureThreshold | int | `3` |  |
-| readinessProbe.httpGet.path | string | `"/health"` |  |
-| readinessProbe.httpGet.port | string | `"http"` |  |
-| readinessProbe.initialDelaySeconds | int | `10` |  |
-| readinessProbe.periodSeconds | int | `5` |  |
-| readinessProbe.timeoutSeconds | int | `3` |  |
-| resources | object | `{}` |  |
-| runtime.socketDir | string | `"/var/run/headscale"` |  |
-| securityContext.allowPrivilegeEscalation | bool | `false` |  |
-| securityContext.capabilities.drop[0] | string | `"ALL"` |  |
-| securityContext.readOnlyRootFilesystem | bool | `false` |  |
-| securityContext.runAsGroup | int | `1000` |  |
-| securityContext.runAsNonRoot | bool | `true` |  |
-| securityContext.runAsUser | int | `1000` |  |
-| service.port | int | `8080` |  |
-| service.type | string | `"ClusterIP"` |  |
-| serviceAccount.annotations | object | `{}` |  |
-| serviceAccount.create | bool | `true` |  |
-| serviceAccount.name | string | `""` |  |
-| tls.secretName | string | `""` | Name of a Kubernetes TLS Secret (must contain tls.crt, tls.key, optionally ca.crt). |
-| ui.configMap.create | bool | `true` |  |
-| ui.configMap.data | object | `{}` |  |
-| ui.configMap.enabled | bool | `false` |  |
-| ui.configMap.key | string | `"config.yaml"` |  |
-| ui.configMap.name | string | `""` |  |
-| ui.configMap.path | string | `"/app/config.yaml"` |  |
-| ui.containerPort | int | `8080` |  |
-| ui.enabled | bool | `false` |  |
-| ui.extraEnv | list | `[]` |  |
-| ui.headscaleUrl | string | `""` |  |
-| ui.headscaleUrlEnvName | string | `"HEADSCALE_URL"` |  |
-| ui.image.pullPolicy | string | `"IfNotPresent"` |  |
-| ui.image.repository | string | `"ghcr.io/gurucomputing/headscale-ui"` |  |
-| ui.image.tag | string | `"latest"` |  |
-| ui.ingress.annotations | object | `{}` |  |
-| ui.ingress.host | string | `""` |  |
-| ui.ingress.path | string | `"/web"` |  |
-| ui.ingress.pathType | string | `"ImplementationSpecific"` |  |
-| ui.ingress.tls | list | `[]` |  |
-| ui.persistence.accessModes[0] | string | `"ReadWriteOnce"` |  |
-| ui.persistence.enabled | bool | `false` |  |
-| ui.persistence.existingClaim | string | `""` |  |
-| ui.persistence.mountPath | string | `"/var/lib/headscale-ui"` |  |
-| ui.persistence.size | string | `"1Gi"` |  |
-| ui.persistence.storageClassName | string | `""` |  |
-| ui.podDisruptionBudget.enabled | bool | `true` |  |
-| ui.podDisruptionBudget.maxUnavailable | int | `1` |  |
-| ui.service.port | int | `8080` |  |
-| ui.service.type | string | `"ClusterIP"` |  |
+| client.acceptDns | string | <code>"unset"</code> | Override accept-dns flag. In daemonset mode this rewrites the host /etc/resolv.conf. On nodes without split-DNS (e.g. Talos) this breaks cluster DNS. Set to false unless your nodes use systemd-resolved. |
+| client.acceptRoutes | string | <code>"unset"</code> | Override accept-routes flag. When true, the client accepts subnet routes advertised by other nodes on the tailnet. Defaults to tailscale's built-in default (false) when left as "unset". |
+| client.advertiseRoutes | list | <code>[]</code> | Routes to advertise to the Tailscale network. When configured, IP forwarding is enabled and the client acts as a subnet router. WARNING: Using 0.0.0.0/0 or ::/0 (exit node mode) will also expose all Kubernetes pods and services to clients using this exit node. |
+| client.authKey | string | <code>""</code> | Inline preauth key for external mode. The chart creates a Secret from it. Mutually exclusive with authKeySecret. Only valid when server.enabled=false. |
+| client.authKeySecret | object | <code>{"key":<wbr>"authkey",<wbr>"name":<wbr>""}</code> | Reference an existing Secret holding the preauth key (external mode). Mutually exclusive with authKey. Only valid when server.enabled=false. |
+| client.caSecretName | string | <code>""</code> | Optional Secret containing a ca.crt to trust the external headscale's TLS certificate (self-signed / private CA). Empty = rely on the system CA bundle (covers Let's Encrypt and other public CAs). Only valid when server.enabled=false. |
+| client.daemonset | bool | <code>false</code> | Run the client as a DaemonSet with hostNetwork, giving every node direct tailnet connectivity. Useful when nodes need to reach tailnet IPs directly (e.g. pulling images from a private registry on the tailnet). WARNING: DaemonSet mode uses hostNetwork and runs privileged on every node, modifying the host network stack. Combined with accept-dns (on by default), this can replace the node's DNS resolver and break cluster DNS on distributions without split-DNS support (e.g. Talos Linux). See client.acceptDns. |
+| client.enabled | bool | <code>true</code> | Enable or disable the tailscale client container. |
+| client.exitNode | bool | <code>false</code> | Enable exit node functionality. When set to true, the client will advertise itself as an exit node. This requires advertiseRoutes to include at least 0.0.0.0/0 and/or ::/0. |
+| client.image.pullPolicy | string | <code>"IfNotPresent"</code> |  |
+| client.image.repository | string | <code>"tailscale/<wbr>tailscale"</code> |  |
+| client.image.tag | string | <code>"stable"</code> |  |
+| client.internalTls | object | <code>{"image":<wbr>{"pullPolicy":<wbr>"IfNotPresent",<wbr>"repository":<wbr>"nginx",<wbr>"tag":<wbr>"alpine"}}</code> | TLS sidecar settings for internal client connectivity. Auto-enabled when both client and ingress are active. |
+| client.job.cronjob.enabled | bool | <code>false</code> |  |
+| client.job.cronjob.schedule | string | <code>"0 3 1 * *"</code> |  |
+| client.job.image.pullPolicy | string | <code>"IfNotPresent"</code> |  |
+| client.job.image.repository | string | <code>"alpine/<wbr>k8s"</code> |  |
+| client.job.image.tag | string | <code>"1.30.2"</code> |  |
+| client.loginServer | string | <code>""</code> | URL of an EXTERNAL headscale to join (client-only mode). Required when server.enabled=false; FORBIDDEN when server.enabled=true. Include the scheme, e.g. https://headscale.example.com |
+| client.podDisruptionBudget | object | <code>{"enabled":<wbr>true,<wbr>"maxUnavailable":<wbr>1}</code> | Pod disruption budget settings for the optional client deployment. |
+| client.preauthKeyExpiration | string | <code>"87600h"</code> | Expiration for the client preauthkey. Headscale defaults to 1h when omitted, which causes the in-cluster client to lose connectivity once the key expires. Set to a long duration to keep the client connected across restarts. The key management job is idempotent and only creates a new key when no valid one exists. |
+| config.database.sqlite.path | string | <code>"/<wbr>var/<wbr>lib/<wbr>headscale/<wbr>db.sqlite"</code> |  |
+| config.database.type | string | <code>"sqlite"</code> |  |
+| config.derp.urls[0] | string | <code>"https:<wbr>/<wbr>/<wbr>controlplane.tailscale.com/<wbr>derpmap/<wbr>default"</code> |  |
+| config.dns.base_domain | string | <code>"headscale.local"</code> |  |
+| config.dns.magic_dns | bool | <code>true</code> |  |
+| config.dns.nameservers.global[0] | string | <code>"1.1.1.1"</code> |  |
+| config.dns.nameservers.global[1] | string | <code>"8.8.8.8"</code> |  |
+| config.dns.override_local_dns | bool | <code>true</code> |  |
+| config.listen_addr | string | <code>"0.0.0.0:<wbr>8080"</code> |  |
+| config.noise.private_key_path | string | <code>"/<wbr>var/<wbr>lib/<wbr>headscale/<wbr>noise_private.key"</code> |  |
+| config.prefixes.v4 | string | <code>"100.64.0.0/<wbr>10"</code> |  |
+| config.prefixes.v6 | string | <code>"fd7a:<wbr>115c:<wbr>a1e0:<wbr>:<wbr>/<wbr>48"</code> |  |
+| config.server_url | string | <code>""</code> |  |
+| configMap.create | bool | <code>true</code> |  |
+| derpMap.configMap.create | bool | <code>true</code> |  |
+| derpMap.configMap.key | string | <code>"derp-map.yaml"</code> |  |
+| derpMap.configMap.name | string | <code>""</code> |  |
+| derpMap.content | object | <code>{}</code> |  |
+| derpMap.enabled | bool | <code>false</code> |  |
+| derpMap.path | string | <code>"/<wbr>etc/<wbr>headscale/<wbr>derp-map.yaml"</code> |  |
+| extraDnsRecords.configMap.create | bool | <code>true</code> |  |
+| extraDnsRecords.configMap.key | string | <code>"extra-dns-records.json"</code> |  |
+| extraDnsRecords.configMap.name | string | <code>""</code> |  |
+| extraDnsRecords.enabled | bool | <code>false</code> |  |
+| extraDnsRecords.path | string | <code>"/<wbr>etc/<wbr>headscale/<wbr>extra-dns-records.json"</code> |  |
+| extraDnsRecords.records | list | <code>[]</code> |  |
+| extraVolumeMounts | list | <code>[]</code> |  |
+| extraVolumes | list | <code>[]</code> |  |
+| forbiddenNodeNames.enabled | bool | <code>false</code> |  |
+| forbiddenNodeNames.job.image.pullPolicy | string | <code>"IfNotPresent"</code> |  |
+| forbiddenNodeNames.job.image.repository | string | <code>"alpine/<wbr>k8s"</code> |  |
+| forbiddenNodeNames.job.image.tag | string | <code>"1.30.2"</code> |  |
+| forbiddenNodeNames.names[0] | string | <code>"localhost"</code> |  |
+| forbiddenNodeNames.schedule | string | <code>"*/<wbr>15 * * * *"</code> |  |
+| fullnameOverride | string | <code>""</code> |  |
+| image.pullPolicy | string | <code>"IfNotPresent"</code> |  |
+| image.repository | string | <code>"headscale/<wbr>headscale"</code> |  |
+| image.tag | string | <code>"v0.28.0"</code> |  |
+| imagePullSecrets | list | <code>[]</code> |  |
+| ingress.annotations | object | <code>{}</code> |  |
+| ingress.className | string | <code>"nginx"</code> |  |
+| ingress.enabled | bool | <code>false</code> |  |
+| ingress.hosts[0].host | string | <code>"headscale.local"</code> |  |
+| ingress.hosts[0].paths[0].path | string | <code>"/<wbr>"</code> |  |
+| ingress.hosts[0].paths[0].pathType | string | <code>"ImplementationSpecific"</code> |  |
+| ingress.tls | list | <code>[]</code> |  |
+| livenessProbe.failureThreshold | int | <code>3</code> |  |
+| livenessProbe.httpGet.path | string | <code>"/<wbr>health"</code> |  |
+| livenessProbe.httpGet.port | string | <code>"http"</code> |  |
+| livenessProbe.initialDelaySeconds | int | <code>10</code> |  |
+| livenessProbe.periodSeconds | int | <code>5</code> |  |
+| livenessProbe.timeoutSeconds | int | <code>3</code> |  |
+| nameOverride | string | <code>""</code> |  |
+| persistence.accessModes[0] | string | <code>"ReadWriteOnce"</code> |  |
+| persistence.enabled | bool | <code>true</code> |  |
+| persistence.existingClaim | string | <code>""</code> |  |
+| persistence.size | string | <code>"1Gi"</code> |  |
+| persistence.storageClassName | string | <code>""</code> |  |
+| podAnnotations | object | <code>{}</code> |  |
+| podDisruptionBudget.enabled | bool | <code>true</code> |  |
+| podDisruptionBudget.maxUnavailable | int | <code>1</code> |  |
+| podLabels | object | <code>{}</code> |  |
+| podSecurityContext.fsGroup | int | <code>1000</code> |  |
+| policy.configMap.create | bool | <code>true</code> |  |
+| policy.configMap.key | string | <code>"policy.json"</code> |  |
+| policy.configMap.name | string | <code>""</code> |  |
+| policy.content | object | <code>{}</code> |  |
+| policy.enabled | bool | <code>false</code> |  |
+| policy.hotReload.enabled | bool | <code>false</code> |  |
+| policy.hotReload.image.pullPolicy | string | <code>"IfNotPresent"</code> |  |
+| policy.hotReload.image.repository | string | <code>"kiwigrid/<wbr>k8s-sidecar"</code> |  |
+| policy.hotReload.image.tag | string | <code>"1.30.3"</code> |  |
+| policy.path | string | <code>"/<wbr>etc/<wbr>headscale/<wbr>policy.json"</code> |  |
+| readinessProbe.failureThreshold | int | <code>3</code> |  |
+| readinessProbe.httpGet.path | string | <code>"/<wbr>health"</code> |  |
+| readinessProbe.httpGet.port | string | <code>"http"</code> |  |
+| readinessProbe.initialDelaySeconds | int | <code>10</code> |  |
+| readinessProbe.periodSeconds | int | <code>5</code> |  |
+| readinessProbe.timeoutSeconds | int | <code>3</code> |  |
+| resources | object | <code>{}</code> |  |
+| runtime.socketDir | string | <code>"/<wbr>var/<wbr>run/<wbr>headscale"</code> |  |
+| securityContext.allowPrivilegeEscalation | bool | <code>false</code> |  |
+| securityContext.capabilities.drop[0] | string | <code>"ALL"</code> |  |
+| securityContext.readOnlyRootFilesystem | bool | <code>false</code> |  |
+| securityContext.runAsGroup | int | <code>1000</code> |  |
+| securityContext.runAsNonRoot | bool | <code>true</code> |  |
+| securityContext.runAsUser | int | <code>1000</code> |  |
+| server.enabled | bool | <code>true</code> |  |
+| service.port | int | <code>8080</code> |  |
+| service.type | string | <code>"ClusterIP"</code> |  |
+| serviceAccount.annotations | object | <code>{}</code> |  |
+| serviceAccount.create | bool | <code>true</code> |  |
+| serviceAccount.name | string | <code>""</code> |  |
+| tls.secretName | string | <code>""</code> | Name of a Kubernetes TLS Secret (must contain tls.crt, tls.key, optionally ca.crt). |
+| ui.configMap.create | bool | <code>true</code> |  |
+| ui.configMap.data | object | <code>{}</code> |  |
+| ui.configMap.enabled | bool | <code>false</code> |  |
+| ui.configMap.key | string | <code>"config.yaml"</code> |  |
+| ui.configMap.name | string | <code>""</code> |  |
+| ui.configMap.path | string | <code>"/<wbr>app/<wbr>config.yaml"</code> |  |
+| ui.containerPort | int | <code>8080</code> |  |
+| ui.enabled | bool | <code>false</code> |  |
+| ui.extraEnv | list | <code>[]</code> |  |
+| ui.headscaleUrl | string | <code>""</code> |  |
+| ui.headscaleUrlEnvName | string | <code>"HEADSCALE_URL"</code> |  |
+| ui.image.pullPolicy | string | <code>"IfNotPresent"</code> |  |
+| ui.image.repository | string | <code>"ghcr.io/<wbr>gurucomputing/<wbr>headscale-ui"</code> |  |
+| ui.image.tag | string | <code>"latest"</code> |  |
+| ui.ingress.annotations | object | <code>{}</code> |  |
+| ui.ingress.host | string | <code>""</code> |  |
+| ui.ingress.path | string | <code>"/<wbr>web"</code> |  |
+| ui.ingress.pathType | string | <code>"ImplementationSpecific"</code> |  |
+| ui.ingress.tls | list | <code>[]</code> |  |
+| ui.persistence.accessModes[0] | string | <code>"ReadWriteOnce"</code> |  |
+| ui.persistence.enabled | bool | <code>false</code> |  |
+| ui.persistence.existingClaim | string | <code>""</code> |  |
+| ui.persistence.mountPath | string | <code>"/<wbr>var/<wbr>lib/<wbr>headscale-ui"</code> |  |
+| ui.persistence.size | string | <code>"1Gi"</code> |  |
+| ui.persistence.storageClassName | string | <code>""</code> |  |
+| ui.podDisruptionBudget.enabled | bool | <code>true</code> |  |
+| ui.podDisruptionBudget.maxUnavailable | int | <code>1</code> |  |
+| ui.service.port | int | <code>8080</code> |  |
+| ui.service.type | string | <code>"ClusterIP"</code> |  |
 
 ----------------------------------------------
 Autogenerated from chart metadata using [helm-docs v1.14.2](https://github.com/norwoodj/helm-docs/releases/v1.14.2)

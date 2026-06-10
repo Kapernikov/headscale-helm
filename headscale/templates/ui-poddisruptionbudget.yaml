@@ -1,4 +1,4 @@
-{{- if and .Values.ui.enabled (.Values.ui.podDisruptionBudget.enabled | default false) }}
+{{- if and .Values.server.enabled .Values.ui.enabled (.Values.ui.podDisruptionBudget.enabled | default false) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

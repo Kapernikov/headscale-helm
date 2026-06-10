@@ -3,9 +3,18 @@
 {{- $hasRoutes := gt (len .Values.client.advertiseRoutes) 0 }}
 {{- $isDaemonSet := .Values.client.daemonset }}
 {{- $tlsSecret := .Values.tls.secretName | default "" }}
-{{- $modeA := .Values.ingress.enabled }}
-{{- $modeB := and (not .Values.ingress.enabled) (ne $tlsSecret "") }}
+{{- $external := not .Values.server.enabled }}
+{{- $modeA := and (not $external) .Values.ingress.enabled }}
+{{- $modeB := and (not $external) (not .Values.ingress.enabled) (ne $tlsSecret "") }}
 {{- $useHttps := or $modeA $modeB }}
+{{- $externalCa := and $external (ne (.Values.client.caSecretName | default "") "") }}
+{{- /* Resolve the preauth-key Secret name/key for external mode */ -}}
+{{- $authSecretName := printf "%s-client-authkey" $fullname }}
+{{- $authSecretKey := "authkey" }}
+{{- if and $external (not .Values.client.authKey) }}
+{{- $authSecretName = .Values.client.authKeySecret.name }}
+{{- $authSecretKey = (.Values.client.authKeySecret.key | default "authkey") }}
+{{- end }}
 apiVersion: apps/v1
 kind: {{ if $isDaemonSet }}DaemonSet{{ else }}Deployment{{ end }}
 metadata:
@@ -41,11 +50,21 @@ spec:
           path: /dev/net/tun
           type: CharDevice
       - name: client-auth-init
+        {{- if $external }}
+        secret:
+          secretName: {{ $authSecretName }}
+          items:
+          - key: {{ $authSecretKey }}
+            path: authkey
+        {{- else }}
         emptyDir: {}
+        {{- end }}
+      {{- if not $external }}
       - name: job-script
         configMap:
           name: {{ $fullname }}-client-job-script
           defaultMode: 0755
+      {{- end }}
       {{- if $modeA }}
       - name: tofu-certs
         emptyDir: {}
@@ -59,6 +78,15 @@ spec:
             path: ca.crt
           optional: true
       {{- end }}
+      {{- if $externalCa }}
+      - name: headscale-ca
+        secret:
+          secretName: {{ .Values.client.caSecretName }}
+          items:
+          - key: ca.crt
+            path: ca.crt
+      {{- end }}
+      {{- if not $external }}
       initContainers:
       - name: ensure-authkey
         image: "{{ .Values.client.job.image.repository }}:{{ .Values.client.job.image.tag }}"
@@ -103,6 +131,7 @@ spec:
         volumeMounts:
         - name: tofu-certs
           mountPath: /tofu-certs
+      {{- end }}
       {{- end }}
       containers:
       - name: tailscale
@@ -162,6 +191,17 @@ spec:
           fi
           {{- end }}
 
+          {{- if $externalCa }}
+          # External mode: Trust CA from client.caSecretName
+          if [ -f /etc/headscale-ca/ca.crt ]; then
+            cat /etc/ssl/certs/ca-certificates.crt /etc/headscale-ca/ca.crt > /tmp/ca-bundle.crt
+            export SSL_CERT_FILE=/tmp/ca-bundle.crt
+            echo "[client] Trusting CA from caSecretName"
+          else
+            echo "[client] WARNING: No ca.crt found in caSecretName secret; using system CA bundle"
+          fi
+          {{- end }}
+
           echo "[client] Starting tailscaled"
           {{- if $isDaemonSet }}
           tailscaled --state=kube:{{ $fullname }}-client-state-${NODE_NAME} --socket=/var/run/tailscale/tailscaled.sock &
@@ -174,13 +214,17 @@ spec:
             AUTH_KEY=$(cat "$AUTH_FILE")
             echo "[client] Performing tailscale up"
             {{- if $isDaemonSet }}
-            {{- if $useHttps }}
+            {{- if $external }}
+            tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client-${NODE_NAME} --login-server={{ .Values.client.loginServer }} \
+            {{- else if $useHttps }}
             tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client-${NODE_NAME} --login-server=https://{{ $fullname }}.{{ .Release.Namespace }}.svc.cluster.local:443 \
             {{- else }}
             tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client-${NODE_NAME} --login-server=http://{{ $fullname }}.{{ .Release.Namespace }}.svc.cluster.local:8080 \
             {{- end }}
             {{- else }}
-            {{- if $useHttps }}
+            {{- if $external }}
+            tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client --login-server={{ .Values.client.loginServer }} \
+            {{- else if $useHttps }}
             tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client --login-server=https://{{ $fullname }}:443 \
             {{- else }}
             tailscale --socket=/var/run/tailscale/tailscaled.sock up --authkey="$AUTH_KEY" --hostname={{ .Chart.Name }}-client --login-server=http://{{ $fullname }}:8080 \
@@ -238,7 +282,7 @@ spec:
           mountPath: /tofu-certs
           readOnly: true
         {{- end }}
-        {{- if $modeB }}
+        {{- if or $modeB $externalCa }}
         - name: headscale-ca
           mountPath: /etc/headscale-ca
           readOnly: true

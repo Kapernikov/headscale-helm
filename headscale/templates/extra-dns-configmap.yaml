@@ -1,5 +1,5 @@
 {{- $extra := .Values.extraDnsRecords -}}
-{{- if and $extra.enabled $extra.configMap.create }}
+{{- if and .Values.server.enabled $extra.enabled $extra.configMap.create }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

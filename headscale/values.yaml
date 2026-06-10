@@ -2,6 +2,15 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
+# Deploy the headscale server. Set to false for "client-only" mode: the chart
+# then deploys ONLY the Tailscale client and joins an EXTERNAL headscale (set
+# client.loginServer). When false, all server-side resources (server Deployment,
+# Service, ConfigMaps, Ingress, PVC, UI, key-gen Job/CronJob, forbidden-node-name
+# renamer) are skipped. ACLs and subnet-route approval then live on the remote
+# headscale and are managed by its administrator.
+server:
+  enabled: true
+
 image:
   repository: headscale/headscale
   pullPolicy: IfNotPresent
@@ -236,6 +245,22 @@ policy:
 client:
   # -- Enable or disable the tailscale client container.
   enabled: true
+  # -- URL of an EXTERNAL headscale to join (client-only mode). Required when
+  # server.enabled=false; FORBIDDEN when server.enabled=true. Include the scheme,
+  # e.g. https://headscale.example.com
+  loginServer: ""
+  # -- Inline preauth key for external mode. The chart creates a Secret from it.
+  # Mutually exclusive with authKeySecret. Only valid when server.enabled=false.
+  authKey: ""
+  # -- Reference an existing Secret holding the preauth key (external mode).
+  # Mutually exclusive with authKey. Only valid when server.enabled=false.
+  authKeySecret:
+    name: ""
+    key: authkey
+  # -- Optional Secret containing a ca.crt to trust the external headscale's TLS
+  # certificate (self-signed / private CA). Empty = rely on the system CA bundle
+  # (covers Let's Encrypt and other public CAs). Only valid when server.enabled=false.
+  caSecretName: ""
   image:
     repository: tailscale/tailscale
     pullPolicy: IfNotPresent

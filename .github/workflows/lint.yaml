@@ -21,3 +21,11 @@ jobs:
 
       - name: Helm template (default values)
         run: helm template headscale headscale/
+
+      - name: Helm template (client-only / external mode)
+        run: |
+          helm template headscale headscale/ \
+            --set server.enabled=false \
+            --set client.enabled=true \
+            --set client.loginServer=https://hs.example.com \
+            --set client.authKey=tskey-auth-EXAMPLE
