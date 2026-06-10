@@ -1,3 +1,29 @@
+{{- /*
+Render the values table ourselves so the "Default" column wraps. The built-in
+helm-docs renderer wraps defaults in a backtick code span; long values with no
+spaces (JSON objects, file paths, URLs) then cannot wrap, forcing the Default
+column wide and squeezing the Description column on GitHub. We render the default
+inside <code> with <wbr> break opportunities (zero-width, invisible) after ',',
+'/' and ':', so the cell can wrap and Description keeps its width.
+*/ -}}
+{{- define "chart.valueDefaultColumnRender" -}}
+{{- $v := (default .Default .AutoDefault) -}}
+{{- $v = $v | trimPrefix "`" | trimSuffix "`" -}}
+{{- $v = $v | replace "|" "\\|" -}}
+{{- $v = $v | replace "," ",<wbr>" | replace "/" "/<wbr>" | replace ":" ":<wbr>" -}}
+<code>{{ $v }}</code>
+{{- end -}}
+{{- define "chart.valuesSection" -}}
+{{- if .Values -}}
+## Values
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+{{- range .Values }}
+| {{ .Key }} | {{ .Type }} | {{ template "chart.valueDefaultColumnRender" . }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .AutoDescription }}{{ end }} |
+{{- end }}
+{{- end -}}
+{{- end -}}
 {{ template "chart.header" . }}
 {{ template "chart.description" . }}
 
