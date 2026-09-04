@@ -32,7 +32,11 @@
 ## Commit & Pull Request Guidelines
 - Messages: Imperative, concise; scope if useful (e.g., `ui:`, `ingress:`).
 - PRs: Describe motivation, changes, and user impact; link issues.
-- When changing values or templates: update `README.md.gotmpl`, run docs, and bump chart version in `headscale/Chart.yaml`.
+- When changing values or templates: update `README.md.gotmpl` and run docs.
+- Do NOT bump `version:` in `headscale/Chart.yaml`. The published chart version comes
+  from the git release tag: `publish-helm-chart.yaml` runs `helm package --version`
+  with the tag name, so the field in `Chart.yaml` is never used. Only `appVersion`
+  (and `image.tag`) are edited by hand, when upgrading headscale itself.
 - Include validation output (e.g., `helm lint`), and screenshots/commands for UI/ingress behavior when relevant.
 
 ## Security & Configuration Tips

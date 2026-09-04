@@ -2,7 +2,7 @@
 
 A Helm chart for deploying Headscale, an open-source implementation of the Tailscale control server.
 
-![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.28.0](https://img.shields.io/badge/AppVersion-0.28.0-informational?style=flat-square)
+![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.29.3](https://img.shields.io/badge/AppVersion-0.29.3-informational?style=flat-square)
 
 ## Client Container
 
@@ -302,6 +302,38 @@ $ hack/kind-smoke.sh --with-client
 
 Every workload deployed by the chart (server, UI, and optional client) now includes a PodDisruptionBudget to describe how voluntary disruptions should be handled. By default each budget sets `maxUnavailable: 1`, which lets Kubernetes evict the single replica when needed (e.g., for node drains) without blocking cluster operations. You can toggle or adjust these budgets through `podDisruptionBudget`, `ui.podDisruptionBudget`, and `client.podDisruptionBudget` in `values.yaml`. Set `enabled: false` to skip creating a budget or provide your own `minAvailable`/`maxUnavailable` values to better match your topology.
 
+## Upgrading to headscale 0.29
+
+This chart now ships headscale `v0.29.3`; earlier releases shipped `v0.28.0`.
+
+**Headscale now enforces a strict upgrade path**: skipping a minor version is
+refused, and so is downgrading. Coming from a chart release that shipped
+headscale 0.27 or earlier, upgrade one minor at a time — install the chart
+version that ships the next headscale minor, let it start once so the database
+migrates, then move on.
+
+Breaking changes to check in your own values before upgrading:
+
+- `config.randomize_client_port` was **removed** from the server config;
+  headscale refuses to start when it is still set. The toggle now lives in the
+  policy file as a top-level `randomizeClientPort` field, so move it to
+  `policy.content` (and enable `policy.enabled` if you have no policy yet).
+- `config.oidc.expiry` was removed. Use `config.node.expiry`, which applies to
+  every registration method, not just OIDC.
+- `config.ephemeral_node_inactivity_timeout` is deprecated in favour of
+  `config.node.ephemeral.inactivity_timeout`.
+- Wildcard `*` in ACL sources and destinations now resolves to the tailnet
+  ranges (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) instead of all IPs. Policies
+  that really meant "any IP" need `autogroup:danger-all` as a source or
+  explicit CIDRs as destinations.
+- MagicDNS names change for nodes whose previous name carried a random hash
+  suffix (`laptop-abc12xyz`); collisions now get a numeric suffix (`laptop-1`).
+
+Also worth setting when running behind the ingress: headscale 0.29 only honours
+`X-Forwarded-For` / `X-Real-IP` / `True-Client-IP` from CIDRs listed in
+`config.trusted_proxies` (empty by default). Add your ingress controller's pod
+CIDR there if you want real client IPs in the logs.
+
 ## Installing the Chart
 
 To install the chart with the release name `my-release`:
@@ -373,7 +405,7 @@ $ helm install my-release foo-bar/headscale
 | fullnameOverride | string | <code>""</code> |  |
 | image.pullPolicy | string | <code>"IfNotPresent"</code> |  |
 | image.repository | string | <code>"headscale/<wbr>headscale"</code> |  |
-| image.tag | string | <code>"v0.28.0"</code> |  |
+| image.tag | string | <code>"v0.29.3"</code> |  |
 | imagePullSecrets | list | <code>[]</code> |  |
 | ingress.annotations | object | <code>{}</code> |  |
 | ingress.className | string | <code>"nginx"</code> |  |
