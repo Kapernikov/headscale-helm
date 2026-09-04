@@ -329,11 +329,11 @@ Every workload deployed by the chart (server, UI, and optional client) now inclu
 
 ## Upgrading to headscale 0.29
 
-Chart 0.3.0 ships headscale `v0.29.3` (previous chart releases shipped `v0.28.0`).
+This chart now ships headscale `v0.29.3`; earlier releases shipped `v0.28.0`.
 
 **Headscale now enforces a strict upgrade path**: skipping a minor version is
-refused, and so is downgrading. Coming from a chart release older than 0.2.0
-(headscale 0.27 or earlier), upgrade one minor at a time — install the chart
+refused, and so is downgrading. Coming from a chart release that shipped
+headscale 0.27 or earlier, upgrade one minor at a time — install the chart
 version that ships the next headscale minor, let it start once so the database
 migrates, then move on.
 
