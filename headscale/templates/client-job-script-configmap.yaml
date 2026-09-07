@@ -59,21 +59,73 @@ data:
     echo "[INFO] Using USER_ID=$USER_ID for '$CLIENT_USER'"
 
     # --- Step 3: Check for existing valid preauth key ---
+    # headscale >= 0.29 dropped the -u/--user flag from 'preauthkeys list': it now
+    # always returns every user's keys, so we filter by user client-side.
+    #
+    # Failures here are fatal on purpose. Previously this command was wrapped in
+    # '2>/dev/null || printf null', so a hard error (e.g. the removed -u flag) was
+    # indistinguishable from "this user has no valid key" -- the script fell through
+    # to step 4 and minted a brand-new key on every single run, which is exactly the
+    # unbounded preauth-key sprawl this guards against. Minting a duplicate key is
+    # far worse than failing loudly, so we do not mask errors.
     echo "[INFO] Checking for existing valid preauth keys..."
-    KEYS_JSON=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale preauthkeys list -u "$USER_ID" -o json 2>/dev/null || printf 'null')
-    NOW_EPOCH=$(date +%s)
+    LIST_ERR=$(mktemp)
+    if ! KEYS_JSON=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale preauthkeys list -o json 2>"$LIST_ERR"); then
+      echo "[ERROR] 'headscale preauthkeys list -o json' failed. Refusing to create a" >&2
+      echo "[ERROR] new preauth key, because doing so on every run causes key sprawl." >&2
+      sed 's/^/[ERROR]   /' "$LIST_ERR" >&2
+      rm -f "$LIST_ERR"
+      exit 1
+    fi
+    rm -f "$LIST_ERR"
+    # headscale prints a bare 'null' (not '[]') when no preauth keys exist at all,
+    # because Go marshals a nil slice that way. That is a legitimate empty result:
+    # the command's exit code above -- not the payload -- is what tells us whether
+    # the call actually failed, so 'null' must not be treated as an error here.
+    [ -n "$KEYS_JSON" ] || KEYS_JSON='null'
+    if ! printf "%s" "$KEYS_JSON" | jq -e 'type == "array" or type == "null"' >/dev/null 2>&1; then
+      echo "[ERROR] Unexpected output from 'headscale preauthkeys list -o json':" >&2
+      echo "[ERROR] expected a JSON array or null. Refusing to create a new preauth key." >&2
+      exit 1
+    fi
 
-    # Extract non-expired keys using shell date for Alpine compatibility
-    VALID_KEYS=""
-    VALID_KEYS=$(printf "%s" "$KEYS_JSON" | jq -r '(. // []) | .[] | select(.expiration != null) | "\(.key) \(.expiration)"' 2>/dev/null | while read -r key exp; do
-      [ -n "$key" ] || continue
-      # Strip fractional seconds for date -d compatibility
-      exp_clean=$(printf "%s" "$exp" | sed 's/\.[0-9]*Z$/Z/; s/\.[0-9]*+/+/')
-      exp_epoch=$(date -d "$exp_clean" +%s 2>/dev/null || echo 0)
-      if [ "$exp_epoch" -gt "$NOW_EPOCH" ]; then
-        printf "%s\n" "$key"
-      fi
-    done) || true
+    NOW_EPOCH=$(date +%s)
+    # Tags step 4 would create the key with; a reuse candidate must match exactly,
+    # otherwise we would hand the client a key with the wrong ACL tags.
+    {{- if gt (len .Values.client.advertiseRoutes) 0 }}
+    WANT_TAGS='["tag:in-cluster-client"]'
+    {{- else }}
+    WANT_TAGS='[]'
+    {{- end }}
+
+    # A key is reusable by us when it belongs to $CLIENT_USER, is itself reusable,
+    # is not already consumed, carries the tags step 4 would set, and has either no
+    # expiry at all or an expiry in the future.
+    #
+    # 'expiration' is a google.protobuf.Timestamp. headscale >= 0.29 renders it as
+    # {"seconds":N,"nanos":N}; older releases rendered RFC3339 strings. Handle both,
+    # and treat an absent expiration as "never expires" (previously such keys were
+    # silently discarded as invalid).
+    VALID_KEYS=$(printf "%s" "$KEYS_JSON" | jq -r \
+      --arg userId "$USER_ID" \
+      --arg userName "$CLIENT_USER" \
+      --argjson now "$NOW_EPOCH" \
+      --argjson wantTags "$WANT_TAGS" '
+      def expiry_epoch:
+        if . == null then "never"
+        elif type == "object" then (.seconds // "never")
+        elif type == "string" then
+          (sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | try fromdateiso8601 catch -1)
+        else -1
+        end;
+      [ (. // [])[]
+        | select(((.user.id // null) | tostring) == $userId or (.user.name // "") == $userName)
+        | select(.reusable == true)
+        | select(.used != true)
+        | select(((.acl_tags // []) | sort) == ($wantTags | sort))
+        | select((.expiration | expiry_epoch) as $e | ($e == "never") or (($e | type) == "number" and $e > $now))
+      ] | .[].key
+    ')
 
     if [ -n "$VALID_KEYS" ]; then
       echo "[INFO] Found valid (non-expired) preauth key(s)."

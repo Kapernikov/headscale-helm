@@ -437,6 +437,60 @@ if [[ $WITH_CLIENT -eq 1 ]]; then
     exit 1
   fi
   echo "[verify] Second helm upgrade completed (init container ran idempotently)"
+
+  # Regression guard: the ensure-authkey init container must REUSE the existing
+  # preauth key, not mint a fresh one on every run. A broken 'preauthkeys list'
+  # check silently falls through to key creation, which sprawls one key per pod
+  # start (and one per node in DaemonSet mode).
+  echo "[verify] Ensuring re-running ensure-authkey reuses the existing preauth key"
+  SERVER_POD=$(kubectl get pods -n headscale -l app.kubernetes.io/component=server -o jsonpath='{.items[0].metadata.name}')
+  count_keys() {
+    kubectl exec -n headscale "$SERVER_POD" -c headscale -- \
+      headscale preauthkeys list -o json 2>/dev/null |
+      jq '[(. // [])[] | select(.user.name == "headscale-system")] | length'
+  }
+  KEYS_BEFORE=$(count_keys)
+  echo "[verify] preauth keys for 'headscale-system' before restart: $KEYS_BEFORE"
+
+  # Recreate the client pod so ensure-authkey runs again from scratch. We wait on
+  # the init container specifically rather than on pod readiness: readiness also
+  # requires tailscaled to register with the tailnet, which is unrelated to the key
+  # logic under test (and flaky in kind).
+  OLD_CLIENT_POD=$(kubectl get pods -n headscale -l app.kubernetes.io/component=client -o jsonpath='{.items[0].metadata.name}')
+  kubectl delete pod "$OLD_CLIENT_POD" -n headscale --wait=true
+
+  echo "[verify] Waiting for the replacement ensure-authkey init container to finish"
+  INIT_DONE=0
+  for _ in $(seq 1 40); do
+    NEW_CLIENT_POD=$(kubectl get pods -n headscale -l app.kubernetes.io/component=client \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [[ -n "$NEW_CLIENT_POD" && "$NEW_CLIENT_POD" != "$OLD_CLIENT_POD" ]]; then
+      REASON=$(kubectl get pod "$NEW_CLIENT_POD" -n headscale \
+        -o jsonpath='{.status.initContainerStatuses[?(@.name=="ensure-authkey")].state.terminated.reason}' 2>/dev/null || true)
+      if [[ "$REASON" == "Completed" ]]; then
+        INIT_DONE=1
+        break
+      fi
+    fi
+    sleep 3
+  done
+  if [[ $INIT_DONE -ne 1 ]]; then
+    echo "[ERROR] Replacement ensure-authkey init container did not complete" >&2
+    kubectl logs "$NEW_CLIENT_POD" -n headscale -c ensure-authkey --tail=30 2>/dev/null || true
+    exit 1
+  fi
+  kubectl logs "$NEW_CLIENT_POD" -n headscale -c ensure-authkey 2>/dev/null | sed 's/^/[verify]   /' || true
+
+  KEYS_AFTER=$(count_keys)
+  echo "[verify] preauth keys for 'headscale-system' after restart:  $KEYS_AFTER"
+  if [[ "$KEYS_AFTER" -gt "$KEYS_BEFORE" ]]; then
+    echo "[ERROR] ensure-authkey created a new preauth key instead of reusing the existing one" >&2
+    echo "[ERROR] ($KEYS_BEFORE -> $KEYS_AFTER). This is preauth-key sprawl." >&2
+    CLIENT_POD=$(kubectl get pods -n headscale -l app.kubernetes.io/component=client -o jsonpath='{.items[0].metadata.name}')
+    kubectl logs "$CLIENT_POD" -n headscale -c ensure-authkey --tail=30 2>/dev/null || true
+    exit 1
+  fi
+  echo "[verify] Preauth key was reused (no sprawl)"
 fi
 
 if [[ $WITH_TLS -eq 1 ]]; then
