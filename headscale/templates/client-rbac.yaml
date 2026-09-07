@@ -23,6 +23,13 @@ rules:
 - apiGroups: [""]
   resources: ["pods/exec"]
   verbs: ["create"]
+# Single-writer lock for minting the preauth key. The ensure-authkey initContainer
+# runs under THIS ServiceAccount (not the -client-job one used by the hook/CronJob),
+# so the permission has to live here or the lock is silently forbidden and the
+# init container spins until it gives up.
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["create", "get", "delete"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

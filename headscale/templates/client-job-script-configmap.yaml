@@ -58,7 +58,7 @@ data:
     fi
     echo "[INFO] Using USER_ID=$USER_ID for '$CLIENT_USER'"
 
-    # --- Step 3: Check for existing valid preauth key ---
+    # --- Step 3: Is the key we already hold still valid? ---
     # headscale >= 0.29 dropped the -u/--user flag from 'preauthkeys list': it now
     # always returns every user's keys, so we filter by user client-side.
     #
@@ -68,28 +68,75 @@ data:
     # to step 4 and minted a brand-new key on every single run, which is exactly the
     # unbounded preauth-key sprawl this guards against. Minting a duplicate key is
     # far worse than failing loudly, so we do not mask errors.
-    echo "[INFO] Checking for existing valid preauth keys..."
-    LIST_ERR=$(mktemp)
-    if ! KEYS_JSON=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale preauthkeys list -o json 2>"$LIST_ERR"); then
-      echo "[ERROR] 'headscale preauthkeys list -o json' failed. Refusing to create a" >&2
-      echo "[ERROR] new preauth key, because doing so on every run causes key sprawl." >&2
-      sed 's/^/[ERROR]   /' "$LIST_ERR" >&2
-      rm -f "$LIST_ERR"
-      exit 1
-    fi
-    rm -f "$LIST_ERR"
-    # headscale prints a bare 'null' (not '[]') when no preauth keys exist at all,
-    # because Go marshals a nil slice that way. That is a legitimate empty result:
-    # the command's exit code above -- not the payload -- is what tells us whether
-    # the call actually failed, so 'null' must not be treated as an error here.
-    [ -n "$KEYS_JSON" ] || KEYS_JSON='null'
-    if ! printf "%s" "$KEYS_JSON" | jq -e 'type == "array" or type == "null"' >/dev/null 2>&1; then
-      echo "[ERROR] Unexpected output from 'headscale preauthkeys list -o json':" >&2
-      echo "[ERROR] expected a JSON array or null. Refusing to create a new preauth key." >&2
-      exit 1
-    fi
+    LOCK_NAME="$FULLNAME-authkey-lock"
+    LOCK_TTL=${LOCK_TTL:-300}
+    LOCK_ANNOTATION="headscale.kapernikov.com/acquired-epoch"
+    HOLDER="${POD_NAME:-$(hostname)}"
+    HELD_LOCK=0
 
-    NOW_EPOCH=$(date +%s)
+    release_lock() {
+      [ "$HELD_LOCK" = "1" ] || return 0
+      HELD_LOCK=0
+      kubectl delete lease -n "$NAMESPACE" "$LOCK_NAME" --ignore-not-found >/dev/null 2>&1 || true
+      echo "[INFO] Released authkey lock."
+    }
+    trap release_lock EXIT INT TERM
+
+    # Raw '.key' values of every key that we would be willing to use, straight from
+    # 'preauthkeys list'. On headscale >= 0.29 these are MASKED --
+    # 'hskey-auth-<keyid>-***' -- so they cannot be handed to tailscaled. They are
+    # only usable as identities, to recognise a key we already hold.
+    list_candidates() {
+      _err=$(mktemp)
+      if ! _json=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale preauthkeys list -o json 2>"$_err"); then
+        echo "[ERROR] 'headscale preauthkeys list -o json' failed. Refusing to create a" >&2
+        echo "[ERROR] new preauth key, because doing so on every run causes key sprawl." >&2
+        sed 's/^/[ERROR]   /' "$_err" >&2
+        rm -f "$_err"
+        exit 1
+      fi
+      rm -f "$_err"
+      # headscale prints a bare 'null' (not '[]') when no preauth keys exist at all,
+      # because Go marshals a nil slice that way. That is a legitimate empty result:
+      # the command's exit code above -- not the payload -- is what tells us whether
+      # the call actually failed, so 'null' must not be treated as an error here.
+      [ -n "$_json" ] || _json='null'
+      if ! printf "%s" "$_json" | jq -e 'type == "array" or type == "null"' >/dev/null 2>&1; then
+        echo "[ERROR] Unexpected output from 'headscale preauthkeys list -o json':" >&2
+        echo "[ERROR] expected a JSON array or null. Refusing to create a new preauth key." >&2
+        exit 1
+      fi
+
+      # A key qualifies when it belongs to $CLIENT_USER, is itself reusable, is not
+      # already consumed, carries the tags step 4 would set, and has either no expiry
+      # at all or an expiry in the future.
+      #
+      # 'expiration' is a google.protobuf.Timestamp. headscale >= 0.29 renders it as
+      # {"seconds":N,"nanos":N}; older releases rendered RFC3339 strings. Handle both,
+      # and treat an absent expiration as "never expires" (previously such keys were
+      # silently discarded as invalid).
+      printf "%s" "$_json" | jq -r \
+        --arg userId "$USER_ID" \
+        --arg userName "$CLIENT_USER" \
+        --argjson now "$(date +%s)" \
+        --argjson wantTags "$WANT_TAGS" '
+        def expiry_epoch:
+          if . == null then "never"
+          elif type == "object" then (.seconds // "never")
+          elif type == "string" then
+            (sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | try fromdateiso8601 catch -1)
+          else -1
+          end;
+        [ (. // [])[]
+          | select(((.user.id // null) | tostring) == $userId or (.user.name // "") == $userName)
+          | select(.reusable == true)
+          | select(.used != true)
+          | select(((.acl_tags // []) | sort) == ($wantTags | sort))
+          | select((.expiration | expiry_epoch) as $e | ($e == "never") or (($e | type) == "number" and $e > $now))
+        ] | .[].key
+      '
+    }
+
     # Tags step 4 would create the key with; a reuse candidate must match exactly,
     # otherwise we would hand the client a key with the wrong ACL tags.
     {{- if gt (len .Values.client.advertiseRoutes) 0 }}
@@ -98,81 +145,225 @@ data:
     WANT_TAGS='[]'
     {{- end }}
 
-    # A key is reusable by us when it belongs to $CLIENT_USER, is itself reusable,
-    # is not already consumed, carries the tags step 4 would set, and has either no
-    # expiry at all or an expiry in the future.
-    #
-    # 'expiration' is a google.protobuf.Timestamp. headscale >= 0.29 renders it as
-    # {"seconds":N,"nanos":N}; older releases rendered RFC3339 strings. Handle both,
-    # and treat an absent expiration as "never expires" (previously such keys were
-    # silently discarded as invalid).
-    VALID_KEYS=$(printf "%s" "$KEYS_JSON" | jq -r \
-      --arg userId "$USER_ID" \
-      --arg userName "$CLIENT_USER" \
-      --argjson now "$NOW_EPOCH" \
-      --argjson wantTags "$WANT_TAGS" '
-      def expiry_epoch:
-        if . == null then "never"
-        elif type == "object" then (.seconds // "never")
-        elif type == "string" then
-          (sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | try fromdateiso8601 catch -1)
-        else -1
-        end;
-      [ (. // [])[]
-        | select(((.user.id // null) | tostring) == $userId or (.user.name // "") == $userName)
-        | select(.reusable == true)
-        | select(.used != true)
-        | select(((.acl_tags // []) | sort) == ($wantTags | sort))
-        | select((.expiration | expiry_epoch) as $e | ($e == "never") or (($e | type) == "number" and $e > $now))
-      ] | .[].key
-    ')
-
-    if [ -n "$VALID_KEYS" ]; then
-      echo "[INFO] Found valid (non-expired) preauth key(s)."
-
-      # Check if the authkey secret already exists and contains a valid key
-      EXISTING_KEY=""
+    read_secret_key() {
       if kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
-        EXISTING_KEY=$(kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.authkey}' | base64 -d 2>/dev/null || true)
+        kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" -o jsonpath='{.data.authkey}' 2>/dev/null | base64 -d 2>/dev/null || true
+      fi
+    }
+
+    # Does $1 (a value from 'preauthkeys list') identify the key in $2 (a full key
+    # from the secret)?
+    #
+    # This is the crux of the fix. headscale >= 0.29 masks the secret portion, so a
+    # listed value can never be compared for equality against, or substituted for, a
+    # real key. What it CAN do is identify one: the mask replaces only the trailing
+    # secret segment, leaving 'hskey-auth-<keyid>-' as a genuine prefix of the full
+    # key. So we match on identity and then keep the key we already have.
+    #
+    # v0.5.1 compared the two for equality, found no match (masked vs. full), and
+    # then "adopted" a listed value -- writing the 27-character mask into the secret,
+    # which tailscaled rejects with "key too short, expected at least 77 chars after
+    # prefix". Older headscale returned full keys here, so an equality check is kept
+    # as a fallback for those.
+    identifies_key() {
+      _cand=$1
+      _have=$2
+      [ -n "$_have" ] || return 1
+      case "$_cand" in
+        *-'***')
+          _ident=${_cand%-'***'}
+          case "$_have" in
+            "$_ident"-*) return 0 ;;
+          esac
+          ;;
+        *)
+          [ "$_cand" = "$_have" ] && return 0
+          ;;
+      esac
+      return 1
+    }
+
+    # A key we could actually hand to tailscaled. This guard is what makes the
+    # fix self-healing rather than self-confirming: a secret written by v0.5.1
+    # contains the 27-character mask, and 'hskey-auth-<keyid>-***' is trivially
+    # "identified" by the very listed value it was copied from. Without this check
+    # the script would look at a known-broken secret, declare it valid, keep it, and
+    # leave the client unable to register forever.
+    #
+    # tailscaled requires at least 77 characters after the 'hskey-auth-' prefix.
+    key_looks_usable() {
+      case "$1" in
+        ''|*'***') return 1 ;;
+      esac
+      [ "${#1}" -ge 60 ]
+    }
+
+    # True when the secret already holds a key that one of $CANDIDATES vouches for.
+    secret_key_is_valid() {
+      _have=$(read_secret_key)
+      [ -n "$_have" ] || return 1
+      if ! key_looks_usable "$_have"; then
+        echo "[WARN] Authkey secret '$SECRET_NAME' holds a masked or truncated key;"
+        echo "[WARN] treating it as unusable so a real one is minted."
+        return 1
+      fi
+      for _c in $CANDIDATES; do
+        if identifies_key "$_c" "$_have"; then
+          VALID_SECRET_KEY=$_have
+          return 0
+        fi
+      done
+      return 1
+    }
+
+    use_secret_key() {
+      echo "[INFO] Authkey secret '$SECRET_NAME' already holds a valid key. Nothing to do."
+      if [ -n "${AUTH_FILE_PATH:-}" ]; then
+        printf "%s" "$VALID_SECRET_KEY" > "$AUTH_FILE_PATH"
+        echo "[INFO] Wrote existing authkey to $AUTH_FILE_PATH"
+      fi
+    }
+
+    echo "[INFO] Checking whether the current authkey is still valid..."
+    # Assigning from a command substitution would discard list_candidates' exit
+    # status -- its 'exit 1' only leaves the subshell, so a hard 'preauthkeys list'
+    # failure would silently look like "no candidates" and fall through to minting,
+    # which is the sprawl this guards against. Check explicitly.
+    if ! CANDIDATES=$(list_candidates); then
+      echo "[ERROR] Could not list preauth keys; refusing to mint a key." >&2
+      exit 1
+    fi
+    VALID_SECRET_KEY=""
+    if secret_key_is_valid; then
+      use_secret_key
+      release_lock
+      exit 0
+    fi
+
+    # --- Step 4: We must mint a key. Serialise, so a cold start does not race. ---
+    # Every client pod runs this initContainer, so on a fresh install all of them
+    # arrive here at once with no secret present and would each mint a key. A Lease
+    # makes exactly one of them the writer; the others wait for the secret and reuse
+    # it. Staleness is tracked with our own epoch annotation rather than
+    # creationTimestamp, because busybox 'date -d' cannot reliably parse RFC3339.
+    # 'create' (not 'apply') is what makes this a lock: it fails if the Lease
+    # already exists, so exactly one pod can win.
+    #
+    # The manifest is emitted with printf rather than a heredoc on purpose. This
+    # whole script is a YAML block scalar in the ConfigMap, so a heredoc body would
+    # have to start at column 0 to have its terminator recognised by sh -- and a
+    # column-0 line ends the block scalar, breaking the chart.
+    acquire_lock() {
+      printf '%s\n' \
+        'apiVersion: coordination.k8s.io/v1' \
+        'kind: Lease' \
+        'metadata:' \
+        "  name: $LOCK_NAME" \
+        '  annotations:' \
+        "    $LOCK_ANNOTATION: \"$(date +%s)\"" \
+        'spec:' \
+        "  holderIdentity: \"$HOLDER\"" \
+        "  leaseDurationSeconds: $LOCK_TTL" \
+        | kubectl create -n "$NAMESPACE" -f - >/dev/null 2>&1
+    }
+
+    # Stale means: a lease exists, and it is older than the TTL, so its holder
+    # almost certainly died. An ABSENT lease is deliberately NOT stale -- we simply
+    # lost a race and will win the next acquire. Reporting "stale" for a missing
+    # lease turns the loop below into a livelock: it "takes over" nothing, hits
+    # 'continue', and spins without ever backing off.
+    lock_is_stale() {
+      _lease=$(kubectl get lease -n "$NAMESPACE" "$LOCK_NAME" -o json 2>/dev/null || true)
+      [ -n "$_lease" ] || return 1
+      _acq=$(printf '%s' "$_lease" | jq -r --arg k "$LOCK_ANNOTATION" \
+        '.metadata.annotations[$k] // empty' 2>/dev/null || true)
+      # A lease with no readable epoch cannot be reasoned about. Treat it as stale
+      # only once its Kubernetes-managed renewTime/creationTimestamp is absent too,
+      # which we cannot parse portably -- so fall back to "stale" and let the
+      # bounded takeover count below stop us from looping.
+      case "$_acq" in
+        ''|*[!0-9]*) return 0 ;;
+      esac
+      [ "$(( $(date +%s) - _acq ))" -gt "$LOCK_TTL" ]
+    }
+
+    echo "[INFO] No valid preauth key held. Acquiring lock to mint one..."
+    LOCK_WAIT=${LOCK_WAIT:-300}
+    _waited=0
+    _takeovers=0
+    while :; do
+      if acquire_lock; then
+        HELD_LOCK=1
+        echo "[INFO] Holding authkey lock as '$HOLDER'."
+        break
       fi
 
-      # Check if the existing secret key is among the valid keys
-      if [ -n "$EXISTING_KEY" ] && printf "%s" "$VALID_KEYS" | grep -qxF "$EXISTING_KEY"; then
-        echo "[INFO] Authkey secret '$SECRET_NAME' already contains a valid key. Nothing to do."
-        if [ -n "${AUTH_FILE_PATH:-}" ]; then
-          printf "%s" "$EXISTING_KEY" > "$AUTH_FILE_PATH"
-          echo "[INFO] Wrote existing authkey to $AUTH_FILE_PATH"
-        fi
+      # Someone else is minting. Re-check first: they may already have written it.
+      CANDIDATES=$(list_candidates) || exit 1
+      if secret_key_is_valid; then
+        echo "[INFO] Another pod minted the key while we waited."
+        use_secret_key
         exit 0
       fi
 
-      # Secret is missing or stale; pick the first valid key and update
-      AUTH_KEY=$(printf "%s" "$VALID_KEYS" | head -n1)
-      echo "[INFO] Updating secret '$SECRET_NAME' with existing valid key."
-    else
-      # --- Step 4: No valid key; create a new one ---
-      echo "[INFO] No valid preauth key found. Creating a new one..."
-      AUTH_KEY=""
-      for i in 1 2 3 4 5; do
-        {{- if gt (len .Values.client.advertiseRoutes) 0 }}
-        PAK_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale preauthkeys create -u "$USER_ID" --reusable --expiration {{ .Values.client.preauthKeyExpiration | default "87600h" }} --tags tag:in-cluster-client -o json 2>&1 || true)
-        {{- else }}
-        PAK_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale preauthkeys create -u "$USER_ID" --reusable --expiration {{ .Values.client.preauthKeyExpiration | default "87600h" }} -o json 2>&1 || true)
-        {{- end }}
-        AUTH_KEY=$(printf "%s" "$PAK_OUT" | jq -r '.key // empty' | head -n1)
-        if [ -n "${AUTH_KEY:-}" ]; then
-          break
+      if lock_is_stale; then
+        if [ "$_takeovers" -ge 3 ]; then
+          echo "[ERROR] Took over the authkey lock $_takeovers times and still cannot" >&2
+          echo "[ERROR] make progress. Refusing to spin; check for a competing writer." >&2
+          exit 1
         fi
-        echo "[WARN] Could not obtain preauth key (attempt $i). Retrying in 3s..."
-        sleep 3
-      done
-      if [ -z "${AUTH_KEY:-}" ]; then
-        echo "[ERROR] Failed to create preauth key after multiple attempts. Last output:" >&2
-        echo "$PAK_OUT" >&2
+        _takeovers=$(( _takeovers + 1 ))
+        echo "[WARN] Authkey lock is stale (older than ${LOCK_TTL}s); taking it over (${_takeovers}/3)."
+        kubectl delete lease -n "$NAMESPACE" "$LOCK_NAME" --ignore-not-found >/dev/null 2>&1 || true
+        # Fall through to the backoff below rather than 'continue': retrying with no
+        # delay is what let this loop spin.
+      fi
+
+      if [ "$_waited" -ge "$LOCK_WAIT" ]; then
+        echo "[ERROR] Timed out after ${LOCK_WAIT}s waiting for the authkey lock held" >&2
+        echo "[ERROR] by another pod. Refusing to mint a duplicate key." >&2
         exit 1
       fi
-      echo "[INFO] Created new preauth key (redacted)."
+      _waited=$(( _waited + 5 ))
+      sleep 5
+    done
+
+    # Double-checked locking: the winner may have finished between our last check
+    # and our acquiring the lock.
+    CANDIDATES=$(list_candidates) || exit 1
+    if secret_key_is_valid; then
+      use_secret_key
+      release_lock
+      exit 0
     fi
+
+    echo "[INFO] Creating a new preauth key..."
+    AUTH_KEY=""
+    for i in 1 2 3 4 5; do
+      {{- if gt (len .Values.client.advertiseRoutes) 0 }}
+      PAK_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale preauthkeys create -u "$USER_ID" --reusable --expiration {{ .Values.client.preauthKeyExpiration | default "87600h" }} --tags tag:in-cluster-client -o json 2>&1 || true)
+      {{- else }}
+      PAK_OUT=$(kubectl exec -n "$NAMESPACE" "$HEADSCALE_POD" -c {{ .Chart.Name }} -- headscale preauthkeys create -u "$USER_ID" --reusable --expiration {{ .Values.client.preauthKeyExpiration | default "87600h" }} -o json 2>&1 || true)
+      {{- end }}
+      AUTH_KEY=$(printf "%s" "$PAK_OUT" | jq -r '.key // empty' | head -n1)
+      if [ -n "${AUTH_KEY:-}" ]; then
+        break
+      fi
+      echo "[WARN] Could not obtain preauth key (attempt $i). Retrying in 3s..."
+      sleep 3
+    done
+    if [ -z "${AUTH_KEY:-}" ]; then
+      echo "[ERROR] Failed to create preauth key after multiple attempts. Last output:" >&2
+      echo "$PAK_OUT" >&2
+      exit 1
+    fi
+    # 'create' is the only headscale command that returns a usable key value; if it
+    # ever comes back masked or truncated, writing it would break the client exactly
+    # as v0.5.1 did, so refuse instead.
+    case "$AUTH_KEY" in
+      *'***') echo "[ERROR] 'preauthkeys create' returned a masked key; refusing to use it." >&2; exit 1 ;;
+    esac
+    echo "[INFO] Created new preauth key (redacted)."
 
     # --- Step 5: Create/update the secret ---
     echo "[INFO] Creating or updating secret '$SECRET_NAME'..."

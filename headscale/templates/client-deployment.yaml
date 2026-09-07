@@ -94,6 +94,12 @@ spec:
         env:
         - name: AUTH_FILE_PATH
           value: /etc/client-auth/authkey
+        # Identifies the holder of the authkey mint lock, so a stale lease can be
+        # traced back to the pod that took it.
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
         command: ["/scripts/ensure-client-key.sh"]
         volumeMounts:
         - name: job-script
