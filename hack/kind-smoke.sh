@@ -452,10 +452,17 @@ if [[ $WITH_CLIENT -eq 1 ]]; then
   KEYS_BEFORE=$(count_keys)
   echo "[verify] preauth keys for 'headscale-system' before restart: $KEYS_BEFORE"
 
-  # Recreate the client pod so ensure-authkey runs again from scratch. We wait on
-  # the init container specifically rather than on pod readiness: readiness also
-  # requires tailscaled to register with the tailnet, which is unrelated to the key
-  # logic under test (and flaky in kind).
+  # Recreate the client pod so ensure-authkey runs again from scratch.
+  #
+  # We wait on the init container to finish, but that is NOT the assertion -- see
+  # the checks after this loop. An earlier version of this test waited only on the
+  # init container and asserted only that the key COUNT had not grown, reasoning
+  # that tailscaled registering was "unrelated to the key logic under test". That
+  # reasoning is what let chart v0.5.1 ship broken: it reused a key perfectly
+  # (count 1 -> 1, test green) while writing headscale's 27-character masked stub
+  # into the secret, which tailscaled rejects with "key too short, expected at
+  # least 77 chars after prefix". The count measured sprawl; nothing measured
+  # whether the key still worked.
   OLD_CLIENT_POD=$(kubectl get pods -n headscale -l app.kubernetes.io/component=client -o jsonpath='{.items[0].metadata.name}')
   kubectl delete pod "$OLD_CLIENT_POD" -n headscale --wait=true
 
@@ -491,6 +498,110 @@ if [[ $WITH_CLIENT -eq 1 ]]; then
     exit 1
   fi
   echo "[verify] Preauth key was reused (no sprawl)"
+
+  # The assertion that actually matters: the stored key must be USABLE. headscale
+  # >= 0.29 masks the secret portion in 'preauthkeys list', so any logic that
+  # copies a listed value into the secret yields something syntactically a key and
+  # functionally useless. Check the artefact directly.
+  echo "[verify] Ensuring the stored authkey is a real key, not a masked stub"
+  STORED_KEY=$(kubectl get secret headscale-client-authkey -n headscale \
+    -o jsonpath='{.data.authkey}' 2>/dev/null | base64 -d 2>/dev/null || true)
+  STORED_LEN=${#STORED_KEY}
+  echo "[verify] stored authkey length: $STORED_LEN"
+  if [[ -z "$STORED_KEY" ]]; then
+    echo "[ERROR] secret headscale-client-authkey has no authkey" >&2
+    exit 1
+  fi
+  if [[ "$STORED_KEY" == *'***' ]]; then
+    echo "[ERROR] stored authkey is a MASKED stub; tailscaled cannot use it." >&2
+    echo "[ERROR] This is the chart v0.5.1 failure." >&2
+    exit 1
+  fi
+  if (( STORED_LEN < 60 )); then
+    echo "[ERROR] stored authkey is only $STORED_LEN chars; a real key is ~88." >&2
+    exit 1
+  fi
+  echo "[verify] Stored authkey looks usable"
+
+  echo "[verify] Ensuring tailscaled did not reject the authkey"
+  sleep 10
+  TS_LOG=$(kubectl logs "$NEW_CLIENT_POD" -n headscale -c tailscale --tail=100 2>/dev/null || true)
+  for pat in 'failed to parse auth-key' 'invalid pre auth key'; do
+    if grep -q "$pat" <<<"$TS_LOG"; then
+      echo "[ERROR] authkey rejected: $pat" >&2
+      grep "$pat" <<<"$TS_LOG" | tail -3 | sed 's/^/[ERROR]   /' >&2
+      exit 1
+    fi
+  done
+  echo "[verify] tailscaled accepted the authkey"
+
+  # The mint lock must not be left behind, or the next cold start waits out the
+  # whole stale-lock TTL before it can proceed.
+  # Checked explicitly because a missing permission is indistinguishable from a
+  # cleanly released lock: both leave no Lease behind. The lease RBAC has to be on
+  # the client ServiceAccount, which is what the initContainer runs as -- putting it
+  # only on the -client-job SA leaves the init container spinning on Forbidden.
+  echo "[verify] Ensuring the client ServiceAccount may manage the mint lock"
+  for verb in create get delete; do
+    if ! kubectl auth can-i "$verb" leases -n headscale \
+      --as=system:serviceaccount:headscale:headscale-client >/dev/null 2>&1; then
+      echo "[ERROR] ServiceAccount headscale-client cannot $verb leases;" >&2
+      echo "[ERROR] the ensure-authkey mint lock would be silently forbidden." >&2
+      exit 1
+    fi
+  done
+  echo "[verify] Client ServiceAccount can manage the mint lock"
+
+  echo "[verify] Ensuring the authkey mint lock was released"
+  if kubectl get lease headscale-authkey-lock -n headscale >/dev/null 2>&1; then
+    echo "[ERROR] Lease headscale-authkey-lock still exists after a successful run" >&2
+    exit 1
+  fi
+  echo "[verify] Mint lock released"
+
+  # Locking: two runs racing from a clean slate must mint exactly one key between
+  # them, not one each. That is the fresh-install case, where no secret exists and
+  # every client pod reaches the mint path together.
+  echo "[verify] Ensuring concurrent ensure-authkey runs mint only one key"
+  kubectl delete secret headscale-client-authkey -n headscale --ignore-not-found >/dev/null
+  kubectl delete lease headscale-authkey-lock -n headscale --ignore-not-found >/dev/null
+  RACE_BEFORE=$(count_keys)
+  # --with-client deploys a Deployment; only --with-client-daemonset makes it a
+  # DaemonSet. Ask for whichever this run actually created.
+  if kubectl get daemonset headscale-client -n headscale >/dev/null 2>&1; then
+    CLIENT_WORKLOAD="daemonset/headscale-client"
+  else
+    CLIENT_WORKLOAD="deployment/headscale-client"
+  fi
+  JOB_IMAGE=$(kubectl get "$CLIENT_WORKLOAD" -n headscale \
+    -o jsonpath='{.spec.template.spec.initContainers[?(@.name=="ensure-authkey")].image}')
+  RACE_TMPL='{"spec":{"serviceAccountName":"headscale-client","containers":[{"name":"r","image":"__IMG__","command":["/scripts/ensure-client-key.sh"],"env":[{"name":"POD_NAME","value":"__NAME__"}],"volumeMounts":[{"name":"s","mountPath":"/scripts","readOnly":true}]}],"volumes":[{"name":"s","configMap":{"name":"headscale-client-job-script","defaultMode":493}}]}}'
+  for n in 1 2; do
+    OV=${RACE_TMPL//__IMG__/$JOB_IMAGE}
+    OV=${OV//__NAME__/authkey-race-$n}
+    kubectl run "authkey-race-$n" -n headscale --restart=Never --image="$JOB_IMAGE" \
+      --overrides="$OV" >/dev/null 2>&1 &
+  done
+  wait
+  for n in 1 2; do
+    kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/authkey-race-$n" \
+      -n headscale --timeout=180s >/dev/null 2>&1 || true
+    echo "[verify]   --- authkey-race-$n ---"
+    kubectl logs "authkey-race-$n" -n headscale 2>/dev/null | sed 's/^/[verify]     /' || true
+  done
+  RACE_AFTER=$(count_keys)
+  MINTED=$((RACE_AFTER - RACE_BEFORE))
+  echo "[verify] keys before race: $RACE_BEFORE, after: $RACE_AFTER (minted $MINTED)"
+  kubectl delete pod authkey-race-1 authkey-race-2 -n headscale --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  if (( MINTED > 1 )); then
+    echo "[ERROR] Two concurrent runs minted $MINTED keys; the lock did not serialise them." >&2
+    exit 1
+  fi
+  if (( MINTED < 1 )); then
+    echo "[ERROR] Expected exactly one key minted after deleting the secret, got $MINTED." >&2
+    exit 1
+  fi
+  echo "[verify] Lock serialised the concurrent runs (exactly one key minted)"
 fi
 
 if [[ $WITH_TLS -eq 1 ]]; then
